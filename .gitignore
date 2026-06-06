@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 配置文件（每个用户自己维护）
+config.yaml
+
+# 测试输出
+test_*.log
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db

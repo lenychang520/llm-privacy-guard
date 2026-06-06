@@ -1,0 +1,18 @@
+{
+  "id": "llm-privacy-guard",
+  "name": {
+    "zh-CN": "LLM 隐私卫士",
+    "en-US": "LLM Privacy Guard"
+  },
+  "version": "0.2.0",
+  "type": "command",
+  "description": {
+    "zh-CN": "在消息发给 LLM 之前自动检测并替换敏感信息（IP、密钥、UUID 等），防止数据泄露到 API 供应商。",
+    "en-US": "Auto-detect and redact sensitive info (IPs, keys, UUIDs) before sending to LLM API, preventing data leaks."
+  },
+  "author": "lenychang",
+  "entry": {
+    "backend": "plugin.py"
+  },
+  "min_version": "0.1.0"
+}

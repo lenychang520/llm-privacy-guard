@@ -1,0 +1,78 @@
+# LLM Privacy Guard 配置文件
+# 放在以下任一位置即可生效:
+#   1. 当前工作目录
+#   2. llm_filter/ 目录
+#   3. ~/.llm-privacy-guard/
+
+# ── 预处理管道 ──
+preprocess:
+  # 移除零宽字符（如 \\u200b 零宽空格），防止按字符拆分绕过
+  strip_zw_chars: true
+  # URL 解码（%3A → : 等），防止 urlencode 绕过
+  url_decode: true
+  # HTML 实体解码（&#64; → @ 等），防止 HTML 实体绕过
+  html_unescape: true
+
+# ── 熵检测配置 ──
+entropy:
+  enabled: true
+  threshold: 5.0
+  min_length: 12
+  mode: "auto"
+
+# ── 内置规则开关 ──
+rules:
+  ipv4: true
+  ipv4_hex: true
+  ipv6: true
+  ipv6_hyphen: true
+  uuid: true
+  uuid_hex: true
+  email: true
+  phone_cn: true
+  phone_cn_sep: true
+  phone_intl: true
+  id_card_cn: true
+  id_card_cn_sep: true
+  ssn_us: true
+  api_key_prefix: true
+  aws_access_key: true
+  ssh_private_key: true
+  ssh_public_key: true     # SSH 公钥（ssh-rsa/ed25519/... AAAA...）
+  sha_hash: true           # 64 位十六进制哈希（SHA256 等）
+  github_token: true
+  jwt: true
+  jwt_multiline: true
+  db_connection_string: true
+  db_cli: true
+  credit_card: true
+  credential_value: true
+  url_query_credential: true   # URL query string 凭证（?pass=...）
+  credential_inline: true      # 行内凭证检测（注释/heredoc/日志等）
+
+# ── 自定义规则 ──
+# 每条规则包含 name（唯一）、pattern（正则）、placeholder（替换文本）
+custom_rules: []
+  # - name: "my_api_domain"
+  #   pattern: "api\\.my-company\\.com"
+  #   placeholder: "[MY_API]"
+  #
+  # - name: "internal_project_id"
+  #   pattern: "PROJ-\\d{8}-[A-Z]{4}"
+  #   placeholder: "[PROJECT_ID]"
+
+# ── 占位符覆盖 ──
+# 如果你不喜欢默认占位符，可以在这里覆盖
+placeholders: {}
+  # ipv4: "[IP_ADDRESS]"
+  # uuid: "[IDENTIFIER]"
+  # email: "[CONTACT]"
+
+# ── 白名单 ──
+whitelist:
+  # 额外的 IP 白名单（内置仅保留 0.0.0.0 和 255.255.255.255；私有 IP 也会被过滤）
+  ips: []
+  # 额外的域名白名单（内置已包含 localhost, example.com 等）
+  domains: []
+  # 完全匹配的字符串白名单
+  strings: []
