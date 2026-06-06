@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""高熵字符串检测 —— 识别无格式但可能是密钥的随机字符串"""
+"""High-entropy string detection — identifies unstructured strings that may be keys/tokens"""
 
 import math
 import re
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class EntropyMatch:
-    """熵检测匹配结果"""
+    """Entropy detection match result"""
 
     value: str
     start: int
@@ -17,24 +17,24 @@ class EntropyMatch:
     length: int
 
 
-# ── 可配置参数 ──
+# ── Configurable parameters ──
 
-# 熵阈值：超过此值认为可能是随机字符串
-# 经验值：正常英文 ~3.5-4.5 bits/char，base64 编码 ~6 bits/char
-# 真正的随机密钥通常 > 5.0
+# Entropy threshold: values above this are considered potentially random.
+# Empirical values: normal English ~3.5-4.5 bits/char, base64 ~6 bits/char.
+# Truly random keys typically exceed 5.0.
 DEFAULT_ENTROPY_THRESHOLD = 5.0
 
-# 最小长度：随机 token 去掉 padding 经常是 12-22 字符
+# Minimum length: random tokens (sans padding) are often 12-22 chars
 DEFAULT_MIN_LENGTH = 12
 
-# 最大采样长度（避免对极长字符串做全量熵计算）
+# Max sample length (avoid full-entropy calc on extremely long strings)
 MAX_SAMPLE_LENGTH = 1024
 
 
 def _shannon_entropy(data: str) -> float:
-    """计算字符串的香农熵（bit per char）。
+    """Calculate Shannon entropy of a string (bits per char).
 
-    熵值越高，字符分布越均匀，越像随机数据。
+    Higher entropy = more uniform character distribution = more likely random.
     """
     from collections import Counter
 
@@ -52,38 +52,39 @@ def _shannon_entropy(data: str) -> float:
     return entropy
 
 
-# ── 需要被排除的常见非敏感高熵字符串模式 ──
+# ── Patterns to exclude from high-entropy detection ──
 
 NON_SECRET_PATTERNS = [
-    # base64 数据（data:image/...）
+    # base64 data URIs (data:image/...)
     re.compile(r"data:[^;]+;base64,", re.IGNORECASE),
 ]
 
 
 def _may_be_secret(value: str) -> bool:
-    """排除明显不是敏感内容的高熵字符串。
+    """Exclude high-entropy strings that are clearly not secrets.
 
-    宽松策略：只有当中文/日文/韩文汉字或假名大量出现时才拒绝。
-    单个标点符号（全角或半角）不阻止检测。
+    Lenient strategy: only reject when CJK characters or kana
+    appear in large numbers. Single punctuation marks (fullwidth
+    or halfwidth) do NOT block detection.
     """
     if not value:
         return False
 
-    # 全是同一个字符
+    # All same character
     if len(set(value)) == 1:
         return False
 
-    # 包含换行 / 制表符 → 不太可能是紧凑密钥
+    # Contains newlines / tabs → unlikely to be a compact key
     if re.search(r"[\n\r\t]", value):
         return False
 
-    # 已经在排除列表中的（如 data URI）
+    # Already in the exclusion list (e.g. data URIs)
     for pat in NON_SECRET_PATTERNS:
         if pat.search(value):
             return False
 
-    # CJK 文字字符（非标点）太多 → 自然语言，不是密钥
-    # Unicode 范围：CJK 统一汉字 + 日文假名 + 韩文
+    # Too many CJK alphabetic characters (not punctuation) → natural language, not a key
+    # Unicode ranges: CJK Unified Ideographs + Japanese Kana + Korean
     cjk_alpha = re.findall(
         r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]",
         value,
@@ -91,8 +92,8 @@ def _may_be_secret(value: str) -> bool:
     if len(cjk_alpha) > len(value) * 0.3:
         return False
 
-    # 空格太多 → 可能是自然语言
-    spaces = value.count(" ") + value.count("\u3000")  # 半角 + 全角空格
+    # Too many spaces → likely natural language
+    spaces = value.count(" ") + value.count("\u3000")  # halfwidth + fullwidth
     if spaces > len(value) * 0.25:
         return False
 
@@ -104,9 +105,9 @@ def find_high_entropy(
     threshold: float = DEFAULT_ENTROPY_THRESHOLD,
     min_length: int = DEFAULT_MIN_LENGTH,
 ) -> list[EntropyMatch]:
-    """在文本中查找高熵子串。
+    """Find high-entropy substrings in text.
 
-    策略：用滑动窗口扫描，然后合并相邻的匹配。
+    Strategy: sliding window scan, then merge adjacent matches.
     """
     if len(text) < min_length:
         return []
@@ -114,7 +115,7 @@ def find_high_entropy(
     matches: list[EntropyMatch] = []
     sample = text[:MAX_SAMPLE_LENGTH]
 
-    # 滑动窗口步长
+    # Sliding window step size
     step = max(1, min_length // 3)
 
     pos = 0
@@ -123,7 +124,7 @@ def find_high_entropy(
         entropy = _shannon_entropy(window)
 
         if entropy >= threshold:
-            # 向右扩展：如果加一个字符熵不降，就扩展
+            # Extend right: keep going if adding a character doesn't drop entropy
             extended_end = pos + min_length
             while extended_end < len(sample):
                 test_window = sample[pos : extended_end + 1]
@@ -147,7 +148,7 @@ def find_high_entropy(
         else:
             pos += step
 
-    # 去重重叠匹配（保留更长的）
+    # Deduplicate overlapping matches (keep the longer one)
     deduped: list[EntropyMatch] = []
     for m in sorted(matches, key=lambda x: (x.start, -x.length)):
         if deduped and m.start < deduped[-1].end:

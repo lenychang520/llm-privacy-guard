@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""LLM Privacy Guard — 核心引擎
+"""LLM Privacy Guard — Core Engine
 
-用法:
+Usage:
     from privacy_engine import filter_text, scan_text, add_rule
 
     safe = filter_text("ssh root@192.168.1.1")
@@ -15,7 +15,7 @@
 
 from .detector import PrivacyDetector
 
-# 单例
+# Singleton
 _detector: PrivacyDetector | None = None
 
 
@@ -31,45 +31,45 @@ def filter_text(
     rules: list[str] | None = None,
     placeholder: str | None = None,
 ) -> str:
-    """过滤文本，用类型占位符替换敏感信息。
+    """Filter text, replacing sensitive info with type placeholders.
 
     Args:
-        text: 原始文本
-        rules: 启用的规则名列表。None 表示全部启用。
-        placeholder: 自定义全局占位符。None 表示使用各规则默认占位符。
+        text: Raw text
+        rules: List of rule names to enable. None means all enabled.
+        placeholder: Custom global placeholder. None means use each rule's default.
 
     Returns:
-        脱敏后的文本
+        Redacted text
     """
     return _get_detector().filter(text, rules=rules, placeholder=placeholder)
 
 
 def scan_text(text: str) -> list[dict]:
-    """扫描文本，返回所有检测到的敏感信息（不修改原文本）。
+    """Scan text, returning all detected sensitive info (without modifying).
 
     Returns:
-        匹配列表，每项包含 type, value, start, end, placeholder
+        List of matches, each containing type, value, start, end, placeholder
     """
     return _get_detector().scan(text)
 
 
 def add_rule(name: str, pattern: str, placeholder: str = "[REDACTED]"):
-    """运行时注册一条自定义规则。
+    """Register a custom rule at runtime.
 
     Args:
-        name: 规则名（唯一标识）
-        pattern: 正则表达式字符串
-        placeholder: 替换后的占位符
+        name: Rule name (unique identifier)
+        pattern: Regex pattern string
+        placeholder: Replacement placeholder text
     """
     _get_detector().add_rule(name, pattern, placeholder)
 
 
 def reload_config():
-    """重新加载 config.yaml 并重置检测器。"""
+    """Reload config.yaml and reset the detector."""
     global _detector
     _detector = PrivacyDetector()
 
 
-# 导出版本
+# Version
 __version__ = "0.2.0"
 __all__ = ["filter_text", "scan_text", "add_rule", "reload_config"]

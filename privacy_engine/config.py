@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""配置加载 —— 从 config.yaml 读取用户自定义规则和参数"""
+"""Config loader — reads user-defined rules and parameters from config.yaml"""
 
 import os
 import logging
@@ -8,22 +8,22 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-# ── 默认配置 ──
+# ── Default config ──
 
 DEFAULT_CONFIG = {
     "preprocess": {
-        "strip_zw_chars": True,    # 移除零宽字符 (\\u200b, \\u200c, 等)
-        "url_decode": True,        # URL 解码 (%3A → :)
-        "html_unescape": True,     # HTML 实体解码 (&#64; → @)
+        "strip_zw_chars": True,    # Remove zero-width chars (\\u200b, \\u200c, etc.)
+        "url_decode": True,        # URL decode (%3A → :)
+        "html_unescape": True,     # HTML entity decode (&#64; → @)
     },
     "entropy": {
-        "enabled": True,          # 是否启用熵检测
-        "threshold": 5.0,         # 熵阈值
-        "min_length": 12,         # 最小检测长度（降为 12，覆盖短 token）
-        "mode": "auto",           # "auto"（自动替换，默认）或 "review"（仅标记）
+        "enabled": True,          # Enable entropy detection
+        "threshold": 5.0,          # Entropy threshold
+        "min_length": 12,          # Min detection length (lowered to 12 for short tokens)
+        "mode": "auto",            # "auto" (auto-replace) or "review" (mark only)
     },
     "rules": {
-        # 内置规则开关，默认全部开启
+        # Built-in rule toggles — all enabled by default
         "ipv4": True,
         "ipv4_hex": True,
         "ipv6": True,
@@ -53,29 +53,29 @@ DEFAULT_CONFIG = {
         "credential_inline": True,
     },
     "custom_rules": [
-        # 用户可以在这里添加自定义正则规则
+        # Users can add custom regex rules here
         # - name: "my_domain"
         #   pattern: "my-company\\.com"
         #   placeholder: "[MY_DOMAIN]"
     ],
     "placeholders": {
-        # 覆盖默认占位符
+        # Override default placeholders
         # ipv4: "[HIDDEN_IP]"
     },
     "whitelist": {
-        "ips": [],      # 额外的 IP 白名单
-        "domains": [],  # 额外的域名白名单
-        "strings": [],  # 完全匹配的白名单字符串
+        "ips": [],      # Extra IP whitelist entries
+        "domains": [],  # Extra domain whitelist entries
+        "strings": [],  # Exact-match whitelist strings
     },
 }
 
 
 def find_config_file() -> Path | None:
-    """查找 config.yaml。
+    """Find config.yaml.
 
-    按以下顺序搜索：
-    1. 当前工作目录
-    2. 插件所在目录的上级（llm_filter/）
+    Search order:
+    1. Current working directory
+    2. Plugin parent directory (llm_filter/)
     3. ~/.llm-privacy-guard/
     """
     candidates = [
@@ -91,29 +91,29 @@ def find_config_file() -> Path | None:
 
 
 def load_config() -> dict:
-    """加载配置，合并默认值与用户配置。"""
+    """Load config, merging defaults with user config."""
     import yaml
 
     config = dict(DEFAULT_CONFIG)
 
-    # 深度复制嵌套 dict，避免引用污染
+    # Deep-copy nested dicts to avoid reference pollution
     for key in ("preprocess", "entropy", "rules", "placeholders", "whitelist"):
         if key in config and isinstance(config[key], dict):
             config[key] = dict(config[key])
 
     config_path = find_config_file()
     if config_path is None:
-        logger.info("未找到 config.yaml，使用默认配置")
+        logger.info("config.yaml not found, using defaults")
         return config
 
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             user_config = yaml.safe_load(f) or {}
     except Exception as e:
-        logger.warning(f"加载 config.yaml 失败: {e}，使用默认配置")
+        logger.warning(f"Failed to load config.yaml: {e}, using defaults")
         return config
 
-    # 深度合并（仅两层——preprocess、entropy、rules、placeholders、whitelist）
+    # Deep merge (two levels only — preprocess, entropy, rules, placeholders, whitelist)
     for section in ("preprocess", "entropy", "rules", "placeholders", "whitelist"):
         if section in user_config:
             if isinstance(config.get(section), dict) and isinstance(user_config[section], dict):
@@ -121,7 +121,7 @@ def load_config() -> dict:
             else:
                 config[section] = user_config[section]
 
-    # 自定义规则直接追加
+    # Custom rules: direct append
     if "custom_rules" in user_config and isinstance(user_config["custom_rules"], list):
         config["custom_rules"] = user_config["custom_rules"]
 

@@ -1,26 +1,26 @@
-# LLM Privacy Guard 配置文件
-# 放在以下任一位置即可生效:
-#   1. 当前工作目录
-#   2. llm_filter/ 目录
+# LLM Privacy Guard Configuration
+# Place in one of these locations to take effect:
+#   1. Current working directory
+#   2. llm_filter/ directory
 #   3. ~/.llm-privacy-guard/
 
-# ── 预处理管道 ──
+# ── Preprocess pipeline ──
 preprocess:
-  # 移除零宽字符（如 \\u200b 零宽空格），防止按字符拆分绕过
+  # Remove zero-width characters (e.g. \\u200b) to prevent character-level bypass
   strip_zw_chars: true
-  # URL 解码（%3A → : 等），防止 urlencode 绕过
+  # URL decode (%3A → : etc.) to prevent urlencode bypass
   url_decode: true
-  # HTML 实体解码（&#64; → @ 等），防止 HTML 实体绕过
+  # HTML entity decode (&#64; → @ etc.) to prevent HTML entity bypass
   html_unescape: true
 
-# ── 熵检测配置 ──
+# ── Entropy detection ──
 entropy:
   enabled: true
   threshold: 5.0
   min_length: 12
   mode: "auto"
 
-# ── 内置规则开关 ──
+# ── Built-in rule toggles ──
 rules:
   ipv4: true
   ipv4_hex: true
@@ -38,8 +38,8 @@ rules:
   api_key_prefix: true
   aws_access_key: true
   ssh_private_key: true
-  ssh_public_key: true     # SSH 公钥（ssh-rsa/ed25519/... AAAA...）
-  sha_hash: true           # 64 位十六进制哈希（SHA256 等）
+  ssh_public_key: true     # SSH public key (ssh-rsa/ed25519/... AAAA...)
+  sha_hash: true           # 64-char hex hash (SHA256 etc.)
   github_token: true
   jwt: true
   jwt_multiline: true
@@ -47,11 +47,11 @@ rules:
   db_cli: true
   credit_card: true
   credential_value: true
-  url_query_credential: true   # URL query string 凭证（?pass=...）
-  credential_inline: true      # 行内凭证检测（注释/heredoc/日志等）
+  url_query_credential: true   # URL query-string credentials (?pass=...)
+  credential_inline: true      # Inline credentials (comments/heredoc/logs etc.)
 
-# ── 自定义规则 ──
-# 每条规则包含 name（唯一）、pattern（正则）、placeholder（替换文本）
+# ── Custom rules ──
+# Each rule has: name (unique), pattern (regex), placeholder (replacement text)
 custom_rules: []
   # - name: "my_api_domain"
   #   pattern: "api\\.my-company\\.com"
@@ -61,18 +61,19 @@ custom_rules: []
   #   pattern: "PROJ-\\d{8}-[A-Z]{4}"
   #   placeholder: "[PROJECT_ID]"
 
-# ── 占位符覆盖 ──
-# 如果你不喜欢默认占位符，可以在这里覆盖
+# ── Placeholder overrides ──
+# Override default placeholders here if you prefer different labels
 placeholders: {}
   # ipv4: "[IP_ADDRESS]"
   # uuid: "[IDENTIFIER]"
   # email: "[CONTACT]"
 
-# ── 白名单 ──
+# ── Whitelist ──
 whitelist:
-  # 额外的 IP 白名单（内置仅保留 0.0.0.0 和 255.255.255.255；私有 IP 也会被过滤）
+  # Extra IP whitelist entries (built-in only preserves 0.0.0.0 and 255.255.255.255;
+  # private IPs are also filtered by default)
   ips: []
-  # 额外的域名白名单（内置已包含 localhost, example.com 等）
+  # Extra domain whitelist entries (built-in includes localhost, example.com etc.)
   domains: []
-  # 完全匹配的字符串白名单
+  # Exact-match string whitelist
   strings: []

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""LLM Privacy Guard — QwenPaw 插件入口
+"""LLM Privacy Guard — QwenPaw plugin entry point
 
-拦截所有发往 LLM 的消息，在发送前脱敏。
-在 register() 中注册命令并 monkey-patch query_handler。
+Intercepts all messages sent to the LLM and redacts them before sending.
+Registers commands and monkey-patches query_handler in register().
 """
 
 import logging
@@ -17,18 +17,19 @@ from privacy_engine import filter_text, scan_text, __version__ as engine_version
 
 logger = logging.getLogger(__name__)
 
-# ── 兼容性版本检查 ──
+# ── Compatibility version check ──
 
 _MIN_QWENPAW_VERSION = (1, 0)
 
 _COMPAT_WARN_TEMPLATE = (
-    "[LLM Privacy Guard] ⚠ 版本兼容性警告: QwenPaw {actual} 低于建议的最低版本 {min_ver}。"
-    "插件可能无法正常工作，敏感数据可能未被过滤。"
+    "[LLM Privacy Guard] ⚠ Version compatibility warning: QwenPaw {actual} "
+    "is below the recommended minimum {min_ver}. "
+    "The plugin may not work correctly; sensitive data may leak."
 )
 
 
 def _check_qwenpaw_version():
-    """检查 QwenPaw 版本兼容性。"""
+    """Check QwenPaw version compatibility."""
     try:
         from qwenpaw import __version__ as qv
         parts = qv.split(".")
@@ -42,18 +43,18 @@ def _check_qwenpaw_version():
             )
         return (True, None)
     except Exception:
-        # 无法检测版本时不阻止加载（可能是在测试环境）
-        logger.debug("无法检测 QwenPaw 版本，跳过兼容性检查")
+        # If version cannot be detected, don't block loading (may be test env)
+        logger.debug("Cannot detect QwenPaw version, skipping compatibility check")
         return (True, None)
 
 
-# ── 消息过滤 ──
+# ── Message filtering ──
 
 def _filter_message_content(msgs: list) -> tuple[list, int]:
-    """遍历消息列表，对 str 或 list[dict] 类型的 content 脱敏。
+    """Iterate message list, redact str or list[dict] content fields.
 
     Returns:
-        (msgs, filtered_count): 脱敏后的消息列表和替换次数
+        (msgs, filtered_count): redacted message list and replacement count
     """
     total_replacements = 0
     for msg in msgs:
@@ -78,10 +79,11 @@ def _filter_message_content(msgs: list) -> tuple[list, int]:
 
 
 def _inject_privacy_warning(msgs: list):
-    """在消息前插入隐私保护失败的警告标记。"""
+    """Prepend a privacy-failure warning marker to the first message."""
     warning = (
-        "⚠ [LLM Privacy Guard] 脱敏过滤器异常，以下消息可能包含未处理的敏感信息。"
-        "请检查日志。"
+        "⚠ [LLM Privacy Guard] Redaction filter failed — "
+        "the following message may contain unprocessed sensitive information. "
+        "Please check the logs."
     )
     if msgs:
         first = msgs[0]
@@ -95,13 +97,13 @@ def _inject_privacy_warning(msgs: list):
 # ── Monkey-patch ──
 
 def _patch_query_handler():
-    """替换 AgentRunner.query_handler，注入脱敏逻辑。"""
+    """Replace AgentRunner.query_handler, injecting redaction logic."""
     try:
         from qwenpaw.app.runner.runner import AgentRunner
     except ImportError:
         logger.error(
-            "[LLM Privacy Guard] 无法导入 AgentRunner，"
-            "插件在当前 QwenPaw 版本中可能不兼容。"
+            "[LLM Privacy Guard] Cannot import AgentRunner — "
+            "plugin may be incompatible with the current QwenPaw version."
         )
         return
 
@@ -112,23 +114,23 @@ def _patch_query_handler():
             _filter_message_content(msgs)
         except Exception:
             logger.error(
-                "[LLM Privacy Guard] 🔴 脱敏预处理失败！"
-                "消息将以原始内容发送，敏感数据可能泄露！",
+                "[LLM Privacy Guard] 🔴 Redaction pre-filter failed! "
+                "Message will be sent raw — sensitive data may leak!",
                 exc_info=True,
             )
-            # fail-closed: 在第一条消息前插入警告标记
+            # fail-closed: insert warning marker before the first message
             _inject_privacy_warning(msgs)
         async for result in original(self, msgs, request, **kwargs):
             yield result
 
     AgentRunner.query_handler = patched
-    logger.info("[LLM Privacy Guard] ✅ 已激活，拦截器就位")
+    logger.info("[LLM Privacy Guard] ✅ Activated — interceptor in place")
 
 
-# ── 命令注册 ──
+# ── Command registration ──
 
 def _cmd_privacy_test(api, args):
-    """命令: /privacy test — 验证插件是否正常工作"""
+    """Command: /privacy test — verify the plugin is working"""
     from privacy_engine import PrivacyDetector
     import yaml
 
@@ -143,41 +145,41 @@ def _cmd_privacy_test(api, args):
         matches = detector.scan(test_input)
 
         lines = [
-            f"🔒 LLM Privacy Guard v{engine_version} — 状态报告",
+            f"🔒 LLM Privacy Guard v{engine_version} — Status Report",
             "─" * 40,
-            f"✅ 拦截器激活，{rules_count} 条规则就绪",
-            f"📋 内置规则 ({len(rule_names)}): {', '.join(rule_names)}",
-            f"🧠 熵检测: {'启用' if ent_cfg.get('enabled') else '关闭'} "
-            f"(模式={ent_cfg.get('mode')}, 阈值={ent_cfg.get('threshold')}, "
-            f"最小长度={ent_cfg.get('min_length')})",
+            f"✅ Interceptor active, {rules_count} rules loaded",
+            f"📋 Built-in rules ({len(rule_names)}): {', '.join(rule_names)}",
+            f"🧠 Entropy detection: {'Enabled' if ent_cfg.get('enabled') else 'Disabled'} "
+            f"(mode={ent_cfg.get('mode')}, threshold={ent_cfg.get('threshold')}, "
+            f"min_length={ent_cfg.get('min_length')})",
             "",
-            "🧪 自测输入:",
-            f"   原始: {test_input}",
-            f"   过滤: {safe}",
-            f"   匹配 {len(matches)} 处: "
+            "🧪 Self-test input:",
+            f"   Raw   : {test_input}",
+            f"   Filtered: {safe}",
+            f"   Matched {len(matches)}: "
             + ", ".join(f"{m['type']}" for m in matches),
             "─" * 40,
-            "✅ 一切正常" if len(matches) >= 3 else "⚠ 匹配数少于预期，请检查配置",
+            "✅ All good" if len(matches) >= 3 else "⚠ Match count below expected — check config",
         ]
         return "\n".join(lines)
     except Exception as e:
-        return f"❌ 检测失败: {e}"
+        return f"❌ Detection failed: {e}"
 
 
 def _cmd_privacy_scan(api, args):
-    """命令: /privacy scan — 扫描当前输入中的敏感信息"""
+    """Command: /privacy scan — scan input text for sensitive info"""
     text = " ".join(args) if args else ""
     if not text:
-        return "用法: /privacy scan <文本>  — 扫描文本中的敏感信息"
+        return "Usage: /privacy scan <text> — scan text for sensitive information"
 
     matches = scan_text(text)
     if not matches:
-        return "✅ 未检测到敏感信息。"
+        return "✅ No sensitive information detected."
 
-    lines = [f"🔍 检测到 {len(matches)} 处敏感信息:"]
+    lines = [f"🔍 Detected {len(matches)} sensitive matches:"]
     for m in matches:
-        conf_tag = " ⚠格式可疑" if m.get("confidence") == "low" else ""
-        ent_tag = f" (熵={m['entropy']:.2f})" if m.get("entropy") else ""
+        conf_tag = " ⚠Suspicious format" if m.get("confidence") == "low" else ""
+        ent_tag = f" (entropy={m['entropy']:.2f})" if m.get("entropy") else ""
         lines.append(
             f"  [{m['type']}]{conf_tag}{ent_tag}: "
             f"{m['value'][:60]} → {m['placeholder']}"
@@ -185,21 +187,21 @@ def _cmd_privacy_scan(api, args):
     return "\n".join(lines)
 
 
-# ── 插件入口 ──
+# ── Plugin entry ──
 
 class PrivacyGuardPlugin:
     def register(self, api):
-        # 版本检查
+        # Version check
         ok, warning = _check_qwenpaw_version()
         if not ok:
             logger.warning(warning)
-            # 仍然加载插件，但记录警告
+            # Still load the plugin, but log the warning
 
-        # 注册命令
+        # Register commands
         api.register_command("privacy", _cmd_privacy_test, subcommand="test")
         api.register_command("privacy", _cmd_privacy_scan, subcommand="scan")
 
-        # 激活拦截器
+        # Activate interceptor
         _patch_query_handler()
 
 
