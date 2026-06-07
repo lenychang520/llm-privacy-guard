@@ -140,7 +140,7 @@ def _cmd_privacy_test(api, args):
         rule_names = list(detector._rules.keys())
         ent_cfg = detector._config.get("entropy", {})
 
-        test_input = "ssh root@[REDACTED_IP] key=sk-abc123def456 ID: ab12cd34-5678-90ab-cdef-1234567890ab"
+        test_input = "ssh root@203.0.113.1 key=sk-abc123def456 ID: ab12cd34-5678-90ab-cdef-1234567890ab"
         safe = detector.filter(test_input)
         matches = detector.scan(test_input)
 

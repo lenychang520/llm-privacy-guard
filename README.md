@@ -16,7 +16,7 @@ When you use cloud AI services like ChatGPT, DeepSeek, or Claude, what you type 
 **LLM Privacy Guard** runs on your machine and automatically replaces sensitive information with placeholders before the message is sent.
 
 ```
-You type:   "ssh root@[REDACTED_IP], key=sk-abc123..."
+You type:   "ssh root@203.0.113.1, key=sk-abc123..."
     ↓ masked locally
 Sent to LLM: "ssh root@[IP], key=[API_KEY]..."
 ```
@@ -69,7 +69,7 @@ pip install -e /path/to/llm-privacy-guard
 from privacy_engine import filter_text, scan_text
 
 # Mask
-safe = filter_text("ssh root@[REDACTED_IP]")
+safe = filter_text("ssh root@203.0.113.1")
 print(safe)  # "ssh root@[IP]"
 
 # Scan (inspect without modifying — for auditing)

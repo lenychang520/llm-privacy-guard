@@ -16,7 +16,7 @@
 **LLM Privacy Guard** 在你的电脑上，在消息发出之前，自动把敏感信息替换成占位符。
 
 ```
-你输入:  "ssh root@[REDACTED_IP]，key=sk-abc123..."
+你输入:  "ssh root@203.0.113.1，key=sk-abc123..."
     ↓ 本地脱敏
 发给 LLM: "ssh root@[IP]，key=[API_KEY]..."
 ```
@@ -69,7 +69,7 @@ pip install -e /path/to/llm-privacy-guard
 from privacy_engine import filter_text, scan_text
 
 # 脱敏
-safe = filter_text("ssh root@[REDACTED_IP]")
+safe = filter_text("ssh root@203.0.113.1")
 print(safe)  # "ssh root@[IP]"
 
 # 扫描（不修改，用于审核）
