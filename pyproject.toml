@@ -25,5 +25,12 @@ classifiers = [
 Homepage = "https://github.com/lenychang520/llm-privacy-guard"
 Issues = "https://github.com/lenychang520/llm-privacy-guard/issues"
 
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
 [tool.setuptools.packages.find]
 include = ["privacy_engine*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

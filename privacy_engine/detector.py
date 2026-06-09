@@ -159,7 +159,7 @@ class PrivacyDetector:
                     (name, re.compile(pattern), placeholder, priority)
                 )
             else:
-                logger.warning(f"Skipping invalid custom rule: {cr}")
+                logger.warning("Skipping invalid custom rule — missing name or pattern")
 
     def _is_whitelisted(self, rule_name: str, value: str) -> bool:
         """Check if a matched value is in the whitelist."""

@@ -115,8 +115,7 @@ def _patch_query_handler():
         except Exception:
             logger.error(
                 "[LLM Privacy Guard] 🔴 Redaction pre-filter failed! "
-                "Message will be sent raw — sensitive data may leak!",
-                exc_info=True,
+                "Message will be sent raw — sensitive data may leak!"
             )
             # fail-closed: insert warning marker before the first message
             _inject_privacy_warning(msgs)
