@@ -230,12 +230,12 @@ whitelist:
 
 ## 路线图
 
-- [ ] **VSCode 扩展** — 可侧载的 `.vsix` 插件，覆盖 Trae / Cursor / Windsurf / VS Code，内置本地代理实现透明消息过滤
 - [x] QwenPaw 插件（透明拦截）
 - [x] `/privacy scan`、`report`、`export`、`reset` 命令
 - [x] 27 条检测规则 + 熵引擎
 - [x] 对抗绕过防御（预处理管道）
 - [x] 安全加固（ReDoS、输入截断、速率金丝雀）
+- [ ] **VSCode 扩展** — 可侧载的 `.vsix` 插件，覆盖 Trae / Cursor / Windsurf / VS Code，内置本地代理实现透明消息过滤
 - [ ] Dify 插件适配
 - [ ] LangChain callback 适配
 - [ ] 内置小型 LLM 语义过滤
