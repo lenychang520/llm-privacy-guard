@@ -107,18 +107,17 @@ AI 永远看不到你的真实数据。零云依赖、零延迟、零配置。
 ### 安装
 
 ```bash
-pip install git+https://github.com/lenychang520/llm-privacy-guard.git
+qwenpaw plugin install https://github.com/lenychang520/llm-privacy-guard/archive/refs/heads/master.zip
 # 完成。自动拦截每条发出的消息。
 ```
 
 ### 升级
 
 ```bash
-pip install --upgrade git+https://github.com/lenychang520/llm-privacy-guard.git
+qwenpaw plugin install --force https://github.com/lenychang520/llm-privacy-guard/archive/refs/heads/master.zip
 ```
 
-> **注意：** 如果之前通过 `qwenpaw plugin install` 安装，请先卸载：
-> `qwenpaw plugin uninstall llm-privacy-guard`。如遇到 `BackendUnavailable` 错误，请先升级 setuptools：`pip install --upgrade setuptools`。
+> **注意：** 如遇到 `BackendUnavailable` 错误，请先升级 setuptools：`pip install --upgrade setuptools`。
 
 用 `/privacy test` 验证：
 

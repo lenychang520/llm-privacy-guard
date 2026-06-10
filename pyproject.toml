@@ -31,9 +31,6 @@ dev = ["pytest>=7.0"]
 [tool.setuptools]
 py-modules = ["plugin"]
 
-[tool.setuptools.data-files]
-"" = ["plugin.json"]
-
 [tool.setuptools.packages.find]
 include = ["privacy_engine*"]
 
