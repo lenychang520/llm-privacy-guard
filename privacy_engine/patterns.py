@@ -144,10 +144,14 @@ BUILTIN_RULES = [
         placeholder="[AWS_KEY]",
     ),
 
-    # ── SSH private key header (incl. PKCS#8 generic format without algorithm prefix) ──
+    # ── SSH private key (full block: header + base64 body + footer) ──
+    #    Matches the ENTIRE key block to prevent leaking the key material.
+    #    Uses [\\s\\S] (dotall equivalent) since re.compile in detector.py has no flags.
     Rule(
         name="ssh_private_key",
-        pattern=r"-----BEGIN\s+(?:RSA|DSA|EC|OPENSSH|PRIVATE)\s+KEY-----",
+        pattern=r"-----BEGIN\s+(?:RSA|DSA|EC|OPENSSH|PRIVATE)\s+KEY-----"
+                r"[\s\S]*?"
+                r"-----END\s+(?:RSA|DSA|EC|OPENSSH|PRIVATE)\s+KEY-----",
         placeholder="[SSH_KEY]",
     ),
 

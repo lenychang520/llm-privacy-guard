@@ -135,12 +135,14 @@ def find_high_entropy(
 
             value = sample[pos:extended_end]
             if _may_be_secret(value):
+                # Recalculate entropy on the extended value for accuracy
+                full_entropy = _shannon_entropy(value)
                 matches.append(
                     EntropyMatch(
                         value=value,
                         start=pos,
                         end=extended_end,
-                        entropy=entropy,
+                        entropy=full_entropy,
                         length=len(value),
                     )
                 )

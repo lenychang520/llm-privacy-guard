@@ -87,20 +87,21 @@ _ZERO_WIDTH_CHARS = re.compile(
 def _preprocess(text: str, config: dict) -> str:
     """Preprocess pipeline: clean text before regex matching.
 
-    Order: 1) NFKC normalization → 2) zero-width stripping → 3) URL decode → 4) HTML decode
+    Order: 1) NFKC normalization → 2) URL decode → 3) HTML decode → 4) zero-width stripping
+    (Zero-width stripping runs LAST so decoded %E2%80%8B / &#8203; etc. get caught.)
     """
     pp = config.get("preprocess", {})
     # NFKC normalization (always applied)
     text = _normalize(text)
-    # Zero-width character removal
-    if pp.get("strip_zw_chars", True):
-        text = _ZERO_WIDTH_CHARS.sub("", text)
     # URL decode
     if pp.get("url_decode", True):
         text = _safe_url_decode(text)
     # HTML entity decode
     if pp.get("html_unescape", True):
         text = _safe_html_unescape(text)
+    # Zero-width character removal (after decode, so encoded zw-chars are caught)
+    if pp.get("strip_zw_chars", True):
+        text = _ZERO_WIDTH_CHARS.sub("", text)
     return text
 
 

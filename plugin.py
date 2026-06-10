@@ -10,7 +10,7 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 _plugin_dir = os.path.dirname(os.path.abspath(__file__))
 if _plugin_dir not in sys.path:
@@ -65,6 +65,15 @@ _cumulative_stats = {
     "by_type": {},
 }
 
+# Snapshot of session stats at last merge — used for delta-based merging
+# to prevent double-counting on repeated _merge_to_cumulative() calls.
+_last_merged = {
+    "messages_processed": 0,
+    "messages_filtered": 0,
+    "total_replacements": 0,
+    "by_type": {},
+}
+
 
 def _load_stats():
     """Load persisted cumulative stats and session history."""
@@ -84,13 +93,19 @@ def _load_stats():
         logger.debug("[LLM Privacy Guard] 📂 No previous stats found or load failed")
 
 
-def _save_stats(session_end: str | None = None):
+def _save_stats(is_session_end: bool = False):
     """Persist cumulative stats + archive current session.
+
+    Uses session_start as upsert key — updates the same entry
+    across multiple saves within one session, preventing history pollution.
 
     Never stores raw values — only aggregated counts and type names.
     """
     global _last_auto_save
     _last_auto_save = time.time()
+
+    # Always merge delta before saving so cumulative is current
+    _merge_to_cumulative()
 
     try:
         # Load existing data to merge
@@ -99,25 +114,35 @@ def _save_stats(session_end: str | None = None):
             with open(_STATS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-        # Merge cumulative
+        # Merge cumulative (now up-to-date after _merge_to_cumulative above)
         data["cumulative"] = dict(_cumulative_stats)
 
-        # Archive current session
+        # Upsert current session (by session_start key)
         sessions = data.get("recent_sessions", [])
         if not isinstance(sessions, list):
             sessions = []
+        session_key = _report_stats.get("session_start", "unknown")
         session_entry = {
-            "start": _report_stats.get("session_start", "unknown"),
-            "end": session_end or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "start": session_key,
+            "end": _report_stats.get("session_end", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             "messages_processed": _report_stats["messages_processed"],
             "messages_filtered": _report_stats["messages_filtered"],
             "total_replacements": _report_stats["total_replacements"],
             "by_type": dict(_report_stats["by_type"]),
         }
-        sessions.append(session_entry)
-        # Keep only recent sessions
-        if len(sessions) > _MAX_RECENT_SESSIONS:
-            sessions = sessions[-_MAX_RECENT_SESSIONS:]
+
+        # Find existing entry by start key and update, or append new
+        found = False
+        for i, s in enumerate(sessions):
+            if s.get("start") == session_key:
+                sessions[i] = session_entry
+                found = True
+                break
+        if not found:
+            sessions.append(session_entry)
+            # Keep only recent sessions
+            if len(sessions) > _MAX_RECENT_SESSIONS:
+                sessions = sessions[-_MAX_RECENT_SESSIONS:]
         data["recent_sessions"] = sessions
 
         with open(_STATS_FILE, "w", encoding="utf-8") as f:
@@ -148,10 +173,13 @@ _report_stats = {
 
 def _reset_report():
     """Reset the masking report stats, archiving current session first."""
-    global _report_stats
-    # Archive current session to cumulative + persistence
+    global _report_stats, _last_merged
+    # Archive current session to cumulative + persistence (final snapshot)
     _merge_to_cumulative()
-    _save_stats(session_end=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    # Mark the session as ended
+    _report_stats["session_end"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _save_stats(is_session_end=True)
+    # Start new session (new session_start = new identity)
     _report_stats = {
         "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "messages_processed": 0,
@@ -160,17 +188,48 @@ def _reset_report():
         "by_type": {},
         "recent_matches": [],
     }
+    _last_merged = {
+        "messages_processed": 0,
+        "messages_filtered": 0,
+        "total_replacements": 0,
+        "by_type": {},
+    }
 
 
 def _merge_to_cumulative():
-    """Merge current session stats into cumulative totals."""
-    _cumulative_stats["messages_processed"] += _report_stats["messages_processed"]
-    _cumulative_stats["messages_filtered"] += _report_stats["messages_filtered"]
-    _cumulative_stats["total_replacements"] += _report_stats["total_replacements"]
+    """Merge current session stats into cumulative totals using delta.
+
+    Only adds counts accumulated since the last merge — safe to call
+    repeatedly (e.g. from report, export, auto_save) without double-counting.
+    """
+    global _last_merged
+    delta_processed = _report_stats["messages_processed"] - _last_merged["messages_processed"]
+    delta_filtered = _report_stats["messages_filtered"] - _last_merged["messages_filtered"]
+    delta_total = _report_stats["total_replacements"] - _last_merged["total_replacements"]
+
+    if delta_processed > 0:
+        _cumulative_stats["messages_processed"] += delta_processed
+    if delta_filtered > 0:
+        _cumulative_stats["messages_filtered"] += delta_filtered
+    if delta_total > 0:
+        _cumulative_stats["total_replacements"] += delta_total
+
+    # by_type delta
     for mtype, count in _report_stats["by_type"].items():
-        _cumulative_stats["by_type"][mtype] = (
-            _cumulative_stats["by_type"].get(mtype, 0) + count
-        )
+        prev = _last_merged["by_type"].get(mtype, 0)
+        delta = count - prev
+        if delta > 0:
+            _cumulative_stats["by_type"][mtype] = (
+                _cumulative_stats["by_type"].get(mtype, 0) + delta
+            )
+
+    # Update last merged snapshot
+    _last_merged = {
+        "messages_processed": _report_stats["messages_processed"],
+        "messages_filtered": _report_stats["messages_filtered"],
+        "total_replacements": _report_stats["total_replacements"],
+        "by_type": dict(_report_stats["by_type"]),
+    }
 
 
 # ── Message filtering ──

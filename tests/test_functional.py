@@ -116,6 +116,10 @@ def test_ssh_pkcs8_generic():
         "-----BEGIN PRIVATE KEY-----\nMIIEvg...\n-----END PRIVATE KEY-----"
     )
     assert "[SSH_KEY]" in result
+    # Verify the entire key block is replaced — no base64 leak
+    assert "MIIEvg" not in result
+    assert "BEGIN PRIVATE KEY" not in result
+    assert "END PRIVATE KEY" not in result
 
 
 def test_uuid_no_hyphens():
