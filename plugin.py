@@ -342,6 +342,73 @@ def _inject_privacy_warning(msgs: list):
 
 # ── Monkey-patch ──
 
+def _try_handle_privacy_command(msgs):
+    """Check if the last user message is a /privacy command and handle it.
+
+    Returns (handled: bool, result_text: str | None).
+    """
+    if not msgs:
+        return False, None
+
+    last_msg = msgs[-1]
+    content = getattr(last_msg, "content", None)
+    if not content:
+        return False, None
+
+    text = None
+    if isinstance(content, str):
+        text = content.strip()
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text = block.get("text", "").strip()
+                break
+
+    if not text or not text.startswith("/privacy"):
+        return False, None
+
+    parts = text.split(None, 2)
+    subcommand = parts[1] if len(parts) > 1 else ""
+    args = parts[2].split() if len(parts) > 2 else []
+
+    handlers = {
+        "test": _cmd_privacy_test,
+        "scan": _cmd_privacy_scan,
+        "report": _cmd_privacy_report,
+        "export": _cmd_privacy_export,
+        "reset": _cmd_privacy_reset,
+    }
+
+    handler = handlers.get(subcommand)
+    if not handler:
+        result = (
+            f"Unknown /privacy subcommand: {subcommand}\n"
+            "Available: test, scan, report, export, reset"
+        )
+    else:
+        try:
+            result = handler(None, args)
+        except Exception as e:
+            result = f"❌ Command failed: {e}"
+
+    return True, result
+
+
+def _replace_message_content(msgs, new_text: str):
+    """Replace the last message's content with new_text."""
+    if not msgs:
+        return
+    last_msg = msgs[-1]
+    content = getattr(last_msg, "content", None)
+    if isinstance(content, str):
+        last_msg.content = new_text
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                block["text"] = new_text
+                break
+
+
 def _patch_query_handler():
     """Replace AgentRunner.query_handler, injecting redaction logic."""
     try:
@@ -356,6 +423,11 @@ def _patch_query_handler():
     original = AgentRunner.query_handler
 
     async def patched(self, msgs, request=None, **kwargs):
+        # Route /privacy commands before redaction
+        handled, cmd_result = _try_handle_privacy_command(msgs)
+        if handled:
+            _replace_message_content(msgs, cmd_result)
+
         try:
             _filter_message_content(msgs)
         except Exception:
@@ -579,12 +651,18 @@ class PrivacyGuardPlugin:
         # Load persisted cumulative stats
         _load_stats()
 
-        # Register commands
-        api.register_command("privacy", _cmd_privacy_test, subcommand="test")
-        api.register_command("privacy", _cmd_privacy_scan, subcommand="scan")
-        api.register_command("privacy", _cmd_privacy_report, subcommand="report")
-        api.register_command("privacy", _cmd_privacy_export, subcommand="export")
-        api.register_command("privacy", _cmd_privacy_reset, subcommand="reset")
+        # Register commands (older QwenPaw may not support register_command)
+        try:
+            api.register_command("privacy", _cmd_privacy_test, subcommand="test")
+            api.register_command("privacy", _cmd_privacy_scan, subcommand="scan")
+            api.register_command("privacy", _cmd_privacy_report, subcommand="report")
+            api.register_command("privacy", _cmd_privacy_export, subcommand="export")
+            api.register_command("privacy", _cmd_privacy_reset, subcommand="reset")
+        except AttributeError:
+            logger.debug(
+                "[LLM Privacy Guard] register_command not available — "
+                "falling back to monkey-patch command routing"
+            )
 
         # Activate interceptor
         _patch_query_handler()
