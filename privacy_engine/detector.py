@@ -356,9 +356,9 @@ class PrivacyDetector:
         """Deduplicate overlapping matches by priority and length.
 
         Rules:
-        1. Sort by priority (lower = more important)
-        2. On overlap: keep higher priority; same priority → keep longer
-        3. If one fully contains another → always keep the larger (avoid info leak)
+        1. Sort by start ascending, then priority ascending (lower = more important)
+        2. Full containment: always keep the larger match (avoid partial redaction leak)
+        3. Partial overlap: higher priority wins; same priority → keep longer
         """
         if not matches:
             return []
@@ -381,12 +381,19 @@ class PrivacyDetector:
                 deduped.append(m)
                 continue
 
-            # Overlapping — compare priority
+            # Full containment: always keep the larger
+            if m.start <= last.start and m.end >= last.end:
+                # m fully contains last → m wins regardless of priority
+                deduped[-1] = m
+                continue
+            if last.start <= m.start and last.end >= m.end:
+                # last fully contains m → keep last
+                continue
+
+            # Partial overlap — compare priority
             if m.priority < last.priority:
-                # Higher priority (lower number) replaces
                 deduped[-1] = m
             elif m.priority == last.priority:
-                # Same priority → keep longer
                 if (m.end - m.start) > (last.end - last.start):
                     deduped[-1] = m
             # else: lower priority → discard

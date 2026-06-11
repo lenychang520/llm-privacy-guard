@@ -34,7 +34,7 @@ _COMPAT_WARN_TEMPLATE = (
 def _check_qwenpaw_version():
     """Check QwenPaw version compatibility."""
     try:
-        from qwenpaw import __version__ as qv
+        from qwenpaw.__version__ import __version__ as qv
         parts = qv.split(".")
         actual = tuple(int(p) for p in parts[:2])
         if actual < _MIN_QWENPAW_VERSION:
@@ -45,7 +45,7 @@ def _check_qwenpaw_version():
                 ),
             )
         return (True, None)
-    except Exception:
+    except (ImportError, AttributeError):
         logger.debug("Cannot detect QwenPaw version, skipping compatibility check")
         return (True, None)
 
@@ -234,13 +234,8 @@ def _merge_to_cumulative():
 
 # ── Message filtering ──
 
-def _filter_message_content(msgs: list) -> tuple[list, int]:
-    """Iterate message list, redact str or list[dict] content fields.
-
-    Returns:
-        (msgs, filtered_count): redacted message list and replacement count
-    """
-    total_replacements = 0
+def _filter_message_content(msgs: list):
+    """Iterate message list, redact str or list[dict] content fields."""
     _report_stats["messages_processed"] += 1
     for msg in msgs:
         content = getattr(msg, "content", None)
@@ -250,7 +245,6 @@ def _filter_message_content(msgs: list) -> tuple[list, int]:
             original = content
             msg.content = filter_text(content)
             if original != msg.content:
-                total_replacements += 1
                 _collect_report(original)
         elif isinstance(content, list):
             for block in content:
@@ -260,9 +254,7 @@ def _filter_message_content(msgs: list) -> tuple[list, int]:
                         original = text
                         block["text"] = filter_text(text)
                         if original != block["text"]:
-                            total_replacements += 1
                             _collect_report(original)
-    return msgs, total_replacements
 
 
 def _collect_report(text: str):
@@ -427,6 +419,10 @@ def _patch_query_handler():
         handled, cmd_result = _try_handle_privacy_command(msgs)
         if handled:
             _replace_message_content(msgs, cmd_result)
+            # Skip redaction for command output — it's already safe
+            async for result in original(self, msgs, request, **kwargs):
+                yield result
+            return
 
         try:
             _filter_message_content(msgs)
