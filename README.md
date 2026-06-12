@@ -99,11 +99,14 @@ These tools need **one manual URL change** (set API endpoint to `http://localhos
 
 | Command | Description |
 |---------|-------------|
-| `privacy-guard setup` | One-shot: start proxy + auto-configure opencode / Continue |
-| `privacy-guard start --daemon` | Start proxy only (background, no window) |
+| `privacy-guard setup` | One-shot: start proxy + auto-configure opencode / Continue / Cline |
+| `privacy-guard setup --auto-start` | Register auto-start on login (Windows/Linux/macOS) |
+| `privacy-guard setup --remove-auto-start` | Remove auto-start registration |
+| `privacy-guard start --daemon` | Start proxy in background (watchdog auto-restarts on crash) |
+| `privacy-guard start --watchdog` | Foreground watchdog mode (auto-restart, for debugging) |
 | `privacy-guard start` | Start proxy in foreground (Ctrl+C to stop) |
-| `privacy-guard stop` | Stop the proxy |
-| `privacy-guard status` | Check if proxy is running |
+| `privacy-guard stop` | Stop everything (watchdog + proxy) |
+| `privacy-guard status` | Check if watchdog and proxy are running |
 | `privacy-guard test` | Verify the filter engine works |
 
 ### Options
@@ -112,6 +115,8 @@ These tools need **one manual URL change** (set API endpoint to `http://localhos
 |--------|-------------|
 | `--port 12345` | Proxy port (default: 19999, or `$PRIVACY_GUARD_PORT`) |
 | `--upstream https://...` | Fallback upstream URL (or `$PRIVACY_GUARD_UPSTREAM`) |
+| `--watchdog` | (start only) Auto-restart on crash |
+| `--auto-start` / `--remove-auto-start` | (setup only) Register/remove auto-start |
 | `--dry-run` | (setup only) Preview config changes without applying |
 
 ---
@@ -172,6 +177,12 @@ Zero-width char stripping, URL/HTML decode, Unicode NFKC normalization — preve
 
 ### Secure by Default
 ReDoS protection, 100KB input cap, protocol address whitelisting, no raw values in logs.
+
+### Crash Recovery
+When started with `--daemon`, a watchdog monitors the proxy. If it crashes, the watchdog restarts it automatically — no human intervention needed.
+
+### Auto-Start
+`privacy-guard setup --auto-start` registers the proxy to launch on login (Windows Startup folder, Linux autostart, macOS launchd). After reboot, the proxy runs without touching anything.
 
 ### Multi-Provider Auto-Routing
 Detects target API from the request's `model` field. No vendor lock-in. 14+ providers built in.
@@ -299,6 +310,8 @@ privacy-guard setup
 - [x] Local HTTP proxy — covers any LLM client
 - [x] CLI + one-click setup — `setup` / `start` / `stop` / `status` / `test`
 - [x] Multi-provider auto-routing — model-based, no vendor lock-in
+- [x] Crash recovery — watchdog auto-restarts proxy on failure
+- [x] Auto-start on login — `setup --auto-start` for Windows/Linux/macOS
 - [ ] Built-in small LLM for semantic filtering
 
 ---

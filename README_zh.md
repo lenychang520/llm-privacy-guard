@@ -66,7 +66,7 @@ LLM Privacy Guard v2.0.0 — Self Test
     [email] zhangjie@company.com => [EMAIL]
 ```
 
-**接下来要做什么？** 什么都不用做。代理已在后台运行，opencode 等工具已自动配置为走代理。像平时一样使用你的 LLM 工具即可，敏感数据会在发出前自动脱敏。
+**接下来要做什么？** 什么都不用做。代理已在后台运行 (带 watchdog 自动重启)，opencode 等工具已自动配置为走代理。像平时一样使用你的 LLM 工具即可，敏感数据会在发出前自动脱敏。
 
 ---
 
@@ -99,20 +99,25 @@ LLM Privacy Guard v2.0.0 — Self Test
 
 | 命令 | 作用 |
 |------|------|
-| `privacy-guard setup` | 一键：启动代理 + 自动配置 opencode / Continue |
-| `privacy-guard start --daemon` | 只启动代理（后台，无窗口） |
-| `privacy-guard start` | 前台启动代理（Ctrl+C 停止） |
-| `privacy-guard stop` | 停止代理 |
-| `privacy-guard status` | 检查代理是否在运行 |
+| `privacy-guard setup` | 一键:启动代理 + 自动配置 opencode / Continue / Cline |
+| `privacy-guard setup --auto-start` | 注册开机自启(Windows/Linux/macOS) |
+| `privacy-guard setup --remove-auto-start` | 取消开机自启 |
+| `privacy-guard start --daemon` | 后台启动代理(自带 watchdog 崩溃自动重启) |
+| `privacy-guard start --watchdog` | 前台 watchdog 模式(崩溃自动重启,调试用) |
+| `privacy-guard start` | 前台启动代理(Ctrl+C 停止) |
+| `privacy-guard stop` | 停止代理(watchdog + proxy 一起停) |
+| `privacy-guard status` | 检查 proxy 和 watchdog 是否都在运行 |
 | `privacy-guard test` | 验证过滤引擎是否正常工作 |
 
 ### 可选参数
 
 | 参数 | 说明 |
 |------|------|
-| `--port 12345` | 指定代理端口（默认 19999，也可设环境变量 `PRIVACY_GUARD_PORT`） |
-| `--upstream https://...` | 指定默认 fallback 上游地址（也可设环境变量 `PRIVACY_GUARD_UPSTREAM`） |
-| `--dry-run` | （仅 `setup`）预览会改什么配置，不实际修改 |
+| `--port 12345` | 指定代理端口(默认 19999, 也可设环境变量 `PRIVACY_GUARD_PORT`) |
+| `--upstream https://...` | 指定默认 fallback 上游地址(也可设环境变量 `PRIVACY_GUARD_UPSTREAM`) |
+| `--watchdog` | (仅 `start`) 崩溃自动重启 |
+| `--auto-start` / `--remove-auto-start` | (仅 `setup`) 注册/取消开机自启 |
+| `--dry-run` | (仅 `setup`) 预览会改什么配置, 不实际修改 |
 
 ---
 
@@ -172,6 +177,12 @@ for m in scan_text("token=ghp_xJ3kL9mN2pQ5rS8"):
 
 ### 默认安全
 ReDoS 防护、100KB 输入截断、白名单机制（协议地址永不过滤）、日志不存原始值。
+
+### 崩溃自愈
+`privacy-guard start --daemon` 后台模式自带 watchdog。如果 proxy 进程异常退出,watchdog 自动重启,无需人工干预。
+
+### 开机自启
+`privacy-guard setup --auto-start` 一条命令注册 Windows/Linux/macOS 开机自启,电脑重启后 proxy 自动运行。
 
 ### 多厂商自动路由
 根据请求中的 `model` 字段自动识别目标 API，无需指定厂商。支持 14+ 常见厂商。
