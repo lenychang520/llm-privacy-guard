@@ -135,7 +135,10 @@ The proxy sits at `http://localhost:19999`. When your tool sends a request to th
 | Check proxy is alive | `privacy-guard status` |
 | Stop proxy temporarily | `privacy-guard stop` |
 | Re-start after stopping | `privacy-guard start` |
+| Proxy was killed by something else | `privacy-guard start` (watchdog auto-restarts it in most cases) |
 | See if filtering works | `privacy-guard test` |
+
+> **Warning:** Do NOT write scripts that kill all Python processes (e.g. `Get-Process python \| Stop-Process` or `pkill python`). This will also kill the privacy proxy and its watchdog.
 
 ---
 
@@ -149,6 +152,7 @@ The proxy sits at `http://localhost:19999`. When your tool sends a request to th
 | Port 19999 already in use | Old proxy didn't stop cleanly | `privacy-guard stop`, wait, retry |
 | Proxy keeps crashing | Unknown error | Run `privacy-guard start --watchdog` to see live logs |
 | Sensitive data not filtered | Using free model or tool-provided model | Switch to a provider using your own API key (see ["Does your traffic go through the proxy?"](#does-your-traffic-actually-go-through-the-proxy)) |
+| Proxy disappeared unexpectedly | Another script killed all Python processes (e.g., `Get-Process python \| Stop-Process`) | **Never** write code that kills all Python processes. Run `privacy-guard start` to restart. |
 
 ---
 

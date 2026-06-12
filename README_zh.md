@@ -135,7 +135,10 @@ privacy-guard setup --auto-start
 | 检查代理活着没 | `privacy-guard status` |
 | 临时停掉代理 | `privacy-guard stop` |
 | 停了之后重启 | `privacy-guard start` |
+| 代理被其他东西杀了 | `privacy-guard start`(watchdog 大多数情况会自动拉起来) |
 | 看过滤有没有效 | `privacy-guard test` |
+
+> **警告:** 不要写杀掉所有 Python 进程的代码(如 `Get-Process python \| Stop-Process` 或 `pkill python`),这会把隐私代理和 watchdog 一起干掉。
 
 ---
 
@@ -149,6 +152,7 @@ privacy-guard setup --auto-start
 | 端口 19999 被占用 | 之前的代理没关干净 | `privacy-guard stop`，等几秒，重试 |
 | 代理反复崩溃 | 未知错误 | 用 `privacy-guard start --watchdog` 看实时日志 |
 | 敏感信息没被过滤 | 正在用免费模型或工具自带的模型 | 切换到你自己的 API Key 模型(见[“你的流量真的经过代理了吗”](#你的流量真的经过代理了吗)) |
+| 代理莫名消失 | 其他脚本杀了所有 Python 进程(如 `Get-Process python \| Stop-Process`) | **绝对不要**写杀所有 Python 进程的代码。敲 `privacy-guard start` 重新启动。 |
 
 ## 支持哪些工具
 
