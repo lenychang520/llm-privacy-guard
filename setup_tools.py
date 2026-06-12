@@ -42,6 +42,29 @@ def _write_json(path: str, data: dict):
 
 # ── opencode ──
 
+# Providers built into opencode's AI SDK — don't need "npm" field
+_BUILTIN_PROVIDERS = {
+    "deepseek", "openai", "anthropic", "google", "google-vertex",
+    "amazon-bedrock", "azure", "azure-cognitive", "groq",
+    "together", "fireworks", "cerebras", "xai", "mistral",
+    "perplexity", "cohere", "huggingface",
+}
+
+
+def _read_opencode_auth() -> list[str]:
+    """Read opencode auth.json to find connected provider names (no keys exposed)."""
+    auth_path = os.path.join(
+        os.path.expanduser("~"), ".local", "share", "opencode", "auth.json"
+    )
+    if not os.path.isfile(auth_path):
+        return []
+    try:
+        with open(auth_path, "r", encoding="utf-8") as f:
+            auth_data = json.loads(f.read())
+        return [k for k, v in auth_data.items() if isinstance(v, dict)]
+    except Exception:
+        return []
+
 def _find_opencode_configs() -> list[str]:
     """Find all opencode config files available."""
     candidates = []
@@ -92,7 +115,7 @@ def setup_opencode(port: int = 19999, dry_run: bool = False) -> list[str]:
 
     for config_path in configs:
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, "r", encoding="utf-8-sig") as f:
                 raw = f.read()
 
             cfg = _parse_jsonc(raw) if raw.strip() else {}
@@ -101,22 +124,29 @@ def setup_opencode(port: int = 19999, dry_run: bool = False) -> list[str]:
             providers = cfg.get("provider", {})
 
             if not providers:
-                # No providers configured — add a generic proxy provider template
+                # No providers in config — add entries for each connected provider
+                connected = _read_opencode_auth()
+                if not connected:
+                    messages.append(
+                        f"  {config_path}: no providers configured and no auth found."
+                        " Run opencode /connect first."
+                    )
+                    continue
+
                 cfg["provider"] = cfg.get("provider", {})
-                cfg["provider"]["privacy-guard"] = {
-                    "npm": "@ai-sdk/openai-compatible",
-                    "name": "Privacy Guard (proxy)",
-                    "options": {"baseURL": proxy_url},
-                }
-                modified = True
-                messages.append(
-                    f"  {config_path}: added [privacy-guard] proxy provider"
-                )
-                messages.append(
-                    "    Note: rename 'privacy-guard' to match your actual provider"
-                    " (e.g. deepseek, openai)"
-                )
-                if not dry_run:
+                for prov_name in connected:
+                    entry = {
+                        "options": {"baseURL": proxy_url},
+                    }
+                    if prov_name not in _BUILTIN_PROVIDERS:
+                        entry["npm"] = "@ai-sdk/openai-compatible"
+                    cfg["provider"][prov_name] = entry
+                    modified = True
+                    messages.append(
+                        f"  {config_path}: [{prov_name}] -> {proxy_url}"
+                    )
+
+                if modified and not dry_run:
                     _write_json(config_path, cfg)
                 continue
 
@@ -140,6 +170,18 @@ def setup_opencode(port: int = 19999, dry_run: bool = False) -> list[str]:
                 messages.append(
                     f"  {config_path}: [{prov_name}] -> {proxy_url}"
                 )
+
+            # Also add connected providers from auth.json not yet in config
+            for prov_name in _read_opencode_auth():
+                if prov_name not in providers:
+                    entry = {"options": {"baseURL": proxy_url}}
+                    if prov_name not in _BUILTIN_PROVIDERS:
+                        entry["npm"] = "@ai-sdk/openai-compatible"
+                    cfg["provider"][prov_name] = entry
+                    modified = True
+                    messages.append(
+                        f"  {config_path}: [{prov_name}] (from auth) -> {proxy_url}"
+                    )
 
             if modified and not dry_run:
                 _write_json(config_path, cfg)
