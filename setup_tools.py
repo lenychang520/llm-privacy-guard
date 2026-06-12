@@ -230,6 +230,9 @@ def run_setup(port: int = 19999, upstream: str = "", dry_run: bool = False) -> i
     Starts the proxy in daemon mode if not already running,
     then configures each detected tool.
 
+    upstream is optional — the proxy auto-detects the target provider
+    from the request body's model field.
+
     Returns number of tools configured.
     """
     from proxy_server import status_server, _run_daemon, DEFAULT_PORT
@@ -240,16 +243,13 @@ def run_setup(port: int = 19999, upstream: str = "", dry_run: bool = False) -> i
     print(f"LLM Privacy Guard — Auto Setup")
     print(f"  Proxy: http://127.0.0.1:{port}")
     if upstream:
-        print(f"  Upstream: {upstream}")
+        print(f"  Fallback upstream: {upstream}")
+    else:
+        print(f"  Upstream: auto-detect from request model (DeepSeek, OpenAI, Anthropic, etc.)")
     print()
 
     # ── Start proxy if not running ──
     if not status_server(port):
-        if not upstream:
-            print(
-                "Warning: upstream not set. Proxy will start but won't forward requests.\n"
-                "  Set --upstream or PRIVACY_GUARD_UPSTREAM to fix this."
-            )
         if not dry_run:
             _run_daemon(port, upstream or "")
     else:

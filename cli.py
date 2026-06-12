@@ -38,7 +38,7 @@ def main():
     )
     p_start.add_argument(
         "--upstream", default=None,
-        help="Upstream LLM API base URL (or set $PRIVACY_GUARD_UPSTREAM)",
+        help="Fallback upstream URL (auto-detected from model if not set, or $PRIVACY_GUARD_UPSTREAM)",
     )
     p_start.add_argument(
         "--daemon", action="store_true",
@@ -98,18 +98,7 @@ def _cmd_start(args):
         env_port = os.environ.get("PRIVACY_GUARD_PORT")
         port = int(env_port) if env_port else DEFAULT_PORT
 
-    upstream = args.upstream or os.environ.get("PRIVACY_GUARD_UPSTREAM")
-    if not upstream:
-        print("Error: Upstream URL is required.")
-        print()
-        print("  privacy-guard start --upstream https://api.deepseek.com")
-        print("  or set the PRIVACY_GUARD_UPSTREAM environment variable.")
-        print()
-        print("Common upstream URLs:")
-        print("  DeepSeek : https://api.deepseek.com")
-        print("  OpenAI   : https://api.openai.com/v1")
-        print("  Anthropic: https://api.anthropic.com")
-        sys.exit(1)
+    upstream = args.upstream or os.environ.get("PRIVACY_GUARD_UPSTREAM") or ""
 
     if args.daemon:
         _run_daemon(port, upstream)
@@ -123,6 +112,8 @@ def _cmd_start(args):
 
     print(f"LLM Privacy Guard v{_get_version()}")
     print(f"  Configure your LLM client to use: http://127.0.0.1:{port}")
+    if not upstream:
+        print(f"  Upstream auto-detected from request model")
     print()
 
     start_server(port=port, upstream=upstream)
@@ -176,14 +167,9 @@ def _cmd_setup(args):
         env_port = os.environ.get("PRIVACY_GUARD_PORT")
         port = int(env_port) if env_port else DEFAULT_PORT
 
-    upstream = args.upstream or os.environ.get("PRIVACY_GUARD_UPSTREAM")
+    upstream = args.upstream or os.environ.get("PRIVACY_GUARD_UPSTREAM") or ""
 
-    if not upstream and not args.dry_run:
-        print("Note: --upstream not set. Proxy will be started but won't forward requests.")
-        print("  You can set it later:  set PRIVACY_GUARD_UPSTREAM=https://api.deepseek.com")
-        print()
-
-    sys.exit(run_setup(port=port, upstream=upstream or "", dry_run=args.dry_run))
+    sys.exit(run_setup(port=port, upstream=upstream, dry_run=args.dry_run))
 
 
 def _get_version() -> str:

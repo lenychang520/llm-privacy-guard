@@ -2,12 +2,14 @@
 """LLM Privacy Guard — Local HTTP Proxy
 
 Intercepts LLM API requests, filters sensitive data via privacy_engine,
-then forwards to the real upstream API. Supports OpenAI-format
-(/v1/chat/completions) and Anthropic-format (/v1/messages).
+then forwards to the real upstream API. Detects the target provider
+automatically from the request body's model field — no upstream
+configuration needed for common providers.
 
 Usage:
-    python -m proxy_server --upstream https://api.deepseek.com
-    python -m proxy_server --port 19999 --upstream https://api.openai.com/v1
+    python -m proxy_server                          # auto-detect
+    python -m proxy_server --port 19999
+    python -m proxy_server --upstream https://api.deepseek.com  # fallback only
 """
 
 import json
@@ -31,7 +33,32 @@ DEFAULT_PORT = 19999
 PID_FILE = os.path.join(_prj_dir, ".privacy_guard.pid")
 
 # ── Paths that contain user messages and need filtering ──
-_FILTER_PATHS = {"/v1/chat/completions", "/v1/messages"}
+_FILTER_PATHS = {
+    "/v1/chat/completions",
+    "/v1/messages",
+    "/chat/completions",  # OpenAI SDK may strip /v1 prefix
+    "/messages",           # Anthropic SDK variant
+}
+
+# ── Model → upstream URL mapping (checked via substring match) ──
+# First match wins. Configure in config.yaml under "proxy.upstream_map".
+_MODEL_UPSTREAM_MAP: list[tuple[str, str]] = [
+    ("deepseek", "https://api.deepseek.com"),
+    ("gpt-", "https://api.openai.com/v1"),
+    ("o1-", "https://api.openai.com/v1"),
+    ("o3-", "https://api.openai.com/v1"),
+    ("o4-", "https://api.openai.com/v1"),
+    ("claude", "https://api.anthropic.com"),
+    ("gemini", "https://generativelanguage.googleapis.com"),
+    ("qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    ("glm", "https://open.bigmodel.cn/api/paas/v4"),
+    ("moonshot", "https://api.moonshot.cn/v1"),
+    ("kimi", "https://api.moonshot.cn/v1"),
+    ("minimax", "https://api.minimax.chat/v1"),
+    ("mistral", "https://api.mistral.ai/v1"),
+    ("llama", "https://api.deepinfra.com/v1/openai"),
+    ("yi-", "https://api.lingyiwanwu.com/v1"),
+]
 
 # Headers to strip when forwarding (they're hop-by-hop or we set our own)
 _HOP_BY_HOP = {
@@ -51,22 +78,47 @@ def _normalize_path(path: str) -> str:
     return path.split("?", 1)[0]
 
 
+def _resolve_upstream(model: str, fallback: str = "") -> str:
+    """Resolve the upstream API URL from the model name.
+
+    Checks model name against the built-in mapping (substring match).
+    Falls back to the configured default if no match found.
+    """
+    if model:
+        model_lower = model.lower()
+        for keyword, upstream in _MODEL_UPSTREAM_MAP:
+            if keyword in model_lower:
+                return upstream
+    return fallback
+
+
 class _ProxyHandler(BaseHTTPRequestHandler):
     """HTTP request handler that filters LLM messages then forwards."""
 
     # Set by factory via class variable
-    upstream_url: str = ""
-    upstream_parsed: ... = None
+    fallback_upstream: str = ""
 
     def _forward(self, body: bytes):
-        """Forward request to upstream and stream response back."""
-        parsed = self.__class__.upstream_parsed
+        """Forward request to appropriate upstream and stream response back."""
+        # Resolve upstream: extract model from body, match to known provider
+        upstream = self._resolve_request_upstream(body)
+        parsed = urlparse(upstream)
         scheme = parsed.scheme
         netloc = parsed.netloc
-        path_bits = [parsed.path.rstrip("/"), self.path.lstrip("/")]
-        path = "/" + "/".join(b for b in path_bits if b)
-        if "?" in self.path:
-            path += "?" + self.path.split("?", 1)[1]
+
+        # Build target path
+        up_path = parsed.path.rstrip("/")
+        req_path = self.path
+        if "?" in req_path:
+            path_no_q, query = req_path.split("?", 1)
+        else:
+            path_no_q, query = req_path, ""
+        path = up_path + "/" + path_no_q.lstrip("/")
+        # Normalise double slashes
+        while "//" in path:
+            path = path.replace("//", "/")
+        if query:
+            path += "?" + query
 
         headers = {}
         for k, v in self.headers.items():
@@ -99,11 +151,28 @@ class _ProxyHandler(BaseHTTPRequestHandler):
 
             conn.close()
         except Exception as e:
-            logger.error("Upstream error: %s", e)
+            logger.error("Upstream error (%s): %s", upstream, e)
             try:
                 self.send_error(502, f"Upstream unreachable: {e}")
             except Exception:
                 pass
+
+    def _resolve_request_upstream(self, body: bytes) -> str:
+        """Determine which upstream API to forward to based on request body."""
+        model = ""
+        try:
+            data = json.loads(body)
+            model = data.get("model", "")
+        except (json.JSONDecodeError, Exception):
+            pass
+
+        upstream = _resolve_upstream(model, self.__class__.fallback_upstream)
+        if not upstream:
+            raise ValueError(
+                "Cannot determine upstream. No model found and no --upstream fallback configured.\n"
+                "Start the proxy with: privacy-guard start --upstream https://api.deepseek.com"
+            )
+        return upstream
 
     def _filter_request_body(self, body: bytes) -> bytes:
         """Filter sensitive data from request body if it's a known LLM path."""
@@ -191,27 +260,21 @@ class _ProxyHandler(BaseHTTPRequestHandler):
         logger.debug("HTTP %s", fmt % args)
 
 
-def _make_handler(upstream_url: str):
-    parsed = urlparse(upstream_url)
-    if not parsed.scheme or not parsed.netloc:
-        raise ValueError(f"Invalid upstream URL: {upstream_url}")
-
+def _make_handler(fallback_upstream: str = ""):
     class _ConfiguredHandler(_ProxyHandler):
         pass
 
-    _ConfiguredHandler.upstream_url = upstream_url
-    _ConfiguredHandler.upstream_parsed = parsed
+    _ConfiguredHandler.fallback_upstream = fallback_upstream
     return _ConfiguredHandler
 
 
 def start_server(port: int = DEFAULT_PORT, upstream: str = ""):
-    """Start the proxy server (blocking). Call from CLI."""
-    if not upstream:
-        raise ValueError(
-            "Upstream URL is required. Pass --upstream or set PRIVACY_GUARD_UPSTREAM."
-        )
+    """Start the proxy server (blocking). Call from CLI.
 
-    handler = _make_handler(upstream)
+    upstream is optional — if not provided, the proxy auto-detects
+    the target provider from the request body's model field.
+    """
+    handler = _make_handler(upstream or "")
     server = HTTPServer(("127.0.0.1", port), handler)
 
     # Write PID for stop/status
@@ -220,7 +283,10 @@ def start_server(port: int = DEFAULT_PORT, upstream: str = ""):
 
     logger.info("LLM Privacy Guard v%s — Proxy started", engine_version)
     logger.info("  Listening : http://127.0.0.1:%d", port)
-    logger.info("  Upstream  : %s", upstream)
+    if upstream:
+        logger.info("  Fallback  : %s", upstream)
+    else:
+        logger.info("  Upstream  : auto-detect from request model")
     logger.info("  Press Ctrl+C to stop")
 
     def _shutdown(sig, frame):
@@ -318,12 +384,14 @@ def status_server(port: int = DEFAULT_PORT) -> bool:
         return False
 
 
-def _run_daemon(port: int, upstream: str):
+def _run_daemon(port: int, upstream: str = ""):
     """Start proxy in a background subprocess (--daemon mode)."""
     import subprocess
 
     script = os.path.join(_prj_dir, "proxy_server.py")
-    cmd = [sys.executable, script, "--port", str(port), "--upstream", upstream]
+    cmd = [sys.executable, script, "--port", str(port)]
+    if upstream:
+        cmd += ["--upstream", upstream]
     env = os.environ.copy()
     env["PYTHONPATH"] = _prj_dir
 
@@ -349,7 +417,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--upstream",
         default=os.environ.get("PRIVACY_GUARD_UPSTREAM", ""),
-        help="Upstream LLM API base URL",
+        help="Fallback upstream URL (optional — auto-detected from model if not set)",
     )
     parser.add_argument("--daemon", action="store_true", help="Run in background")
     args = parser.parse_args()
@@ -360,12 +428,7 @@ if __name__ == "__main__":
         datefmt="%H:%M:%S",
     )
 
-    if not args.upstream:
-        parser.error(
-            "Upstream URL is required. Use --upstream or set PRIVACY_GUARD_UPSTREAM."
-        )
-
     if args.daemon:
-        _run_daemon(args.port, args.upstream)
+        _run_daemon(args.port, args.upstream or "")
     else:
-        start_server(args.port, args.upstream)
+        start_server(args.port, args.upstream or "")
