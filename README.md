@@ -107,6 +107,25 @@ Now the proxy starts automatically every time you log in. You'll never need to t
 
 **Done.** Open your AI tools and use them as normal. Every message is silently filtered.
 
+### Does your traffic actually go through the proxy?
+
+**Only messages sent with your own API key / enterprise endpoint are filtered.**
+
+The proxy sits at `http://localhost:19999`. When your tool sends a request to that address, the proxy intercepts it, filters sensitive data, and forwards to the real LLM API. This ONLY works when:
+
+- Your tool is configured to **use your own API endpoint** (base URL → `http://localhost:19999`)
+- You select a provider that has a `baseURL` field you can change
+
+**Not filtered:**
+
+| Model type | Why |
+|------------|-----|
+| Free models provided by the tool itself (opencode free, Trae iCube, Cursor free, Copilot free) | These go through the tool vendor's own backend — never touch your proxy |
+| GitHub Copilot (any tier) | Proprietary backend, no custom endpoint support |
+| Trae built-in AI (iCube) | Endpoint is hardcoded |
+
+**Before trusting the filter** — send a test message containing a fake IP like `1.2.3.4` and ask the AI "what IP did I just send?". If the AI sees `1.2.3.4`, your current chat is NOT going through the proxy. Switch to a model that uses your own API key.
+
 ---
 
 ### Everyday Use
@@ -129,6 +148,7 @@ Now the proxy starts automatically every time you log in. You'll never need to t
 | 502 error from proxy | Model not recognized, no fallback | Set `--upstream` or check model name |
 | Port 19999 already in use | Old proxy didn't stop cleanly | `privacy-guard stop`, wait, retry |
 | Proxy keeps crashing | Unknown error | Run `privacy-guard start --watchdog` to see live logs |
+| Sensitive data not filtered | Using free model or tool-provided model | Switch to a provider using your own API key (see ["Does your traffic go through the proxy?"](#does-your-traffic-actually-go-through-the-proxy)) |
 
 ---
 
