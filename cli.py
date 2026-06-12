@@ -145,6 +145,7 @@ def _cmd_start(args):
 
 def _run_watchdog(port: int, upstream: str):
     """Run proxy with auto-restart on crash."""
+    import signal
     import subprocess
     import time
 
@@ -176,12 +177,30 @@ def _run_watchdog(port: int, upstream: str):
         os.getpid(),
     )
 
+    # Signal handling: don't let the watchdog die on signals.
+    # Forward to proxy, then let the loop decide whether to restart.
+    _child_proc = None
+
+    def _forward_signal(sig, frame):
+        nonlocal _child_proc
+        logger.info("Watchdog received signal %d, forwarding to proxy", sig)
+        if _child_proc is not None and _child_proc.poll() is None:
+            _child_proc.send_signal(sig)
+
+    for sig_name in ("SIGINT", "SIGTERM"):
+        try:
+            sig = getattr(signal, sig_name)
+            signal.signal(sig, _forward_signal)
+        except (ValueError, AttributeError):
+            pass
+
     while True:
         if os.path.exists(STOP_FILE):
             logger.info("Stop signal received")
             break
 
         proc = subprocess.Popen(cmd, env=env)
+        _child_proc = proc
         logger.info("Proxy started (PID: %d)", proc.pid)
 
         # Poll while waiting, so we can check stop file
@@ -197,10 +216,11 @@ def _run_watchdog(port: int, upstream: str):
                         proc.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         proc.kill()
+                        proc.wait()
                     break
 
         exit_code = proc.returncode
-        if exit_code == 0 or os.path.exists(STOP_FILE):
+        if os.path.exists(STOP_FILE) or (exit_code is not None and exit_code == 0):
             logger.info("Proxy stopped cleanly — watchdog exiting")
             break
 

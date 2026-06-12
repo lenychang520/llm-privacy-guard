@@ -299,22 +299,26 @@ def start_server(port: int = DEFAULT_PORT, upstream: str = ""):
         logger.info("  Upstream  : auto-detect from request model")
     logger.info("  Press Ctrl+C to stop")
 
+    exit_code_override = 0
+
     def _shutdown(sig, frame):
-        logger.info("Shutting down...")
+        nonlocal exit_code_override
+        exit_code_override = 128 + sig
+        logger.info("Received signal %d, shutting down...", sig)
         server.shutdown()
 
     try:
         signal.signal(signal.SIGINT, _shutdown)
         signal.signal(signal.SIGTERM, _shutdown)
     except ValueError:
-        # Not in main thread — signal registration not available,
-        # but this only affects kill-by-signal. HTTP /__shutdown still works.
         pass
 
     try:
         server.serve_forever()
     finally:
         _cleanup()
+
+    sys.exit(exit_code_override)
 
 
 def _cleanup():
