@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 # ── Default config ──
 
 DEFAULT_CONFIG = {
+    "proxy": {
+        "upstream_map": {},       # Custom model -> upstream overrides
+    },
     "preprocess": {
         "strip_zw_chars": True,    # Remove zero-width chars (\\u200b, \\u200c, etc.)
         "url_decode": True,        # URL decode (%3A → :)
@@ -70,22 +73,43 @@ DEFAULT_CONFIG = {
 }
 
 
+def _user_config_candidates() -> list[Path]:
+    """Return supported per-user config locations in priority order."""
+    return [
+        Path.home() / ".config" / "llm-privacy-guard" / "config.yaml",
+        Path.home() / ".llm-privacy-guard" / "config.yaml",
+    ]
+
+
+def get_user_config_path() -> Path:
+    """Return the preferred per-user config path for writes."""
+    for path in _user_config_candidates():
+        if path.exists():
+            return path
+    return _user_config_candidates()[0]
+
+
 def find_config_file() -> Path | None:
     """Find config.yaml.
 
     Search order:
     1. Current working directory (⚠ highest priority — be aware)
     2. Plugin parent directory (llm_filter/)
-    3. ~/.llm-privacy-guard/
+    3. Per-user config (~/.config/llm-privacy-guard/ or ~/.llm-privacy-guard/)
     """
     candidates = [
         Path.cwd() / "config.yaml",
         Path(__file__).resolve().parent.parent / "config.yaml",
-        Path.home() / ".llm-privacy-guard" / "config.yaml",
+        *_user_config_candidates(),
     ]
 
     for p in candidates:
-        if p.exists():
+        try:
+            exists = p.exists()
+        except OSError as e:
+            logger.warning("Cannot access config candidate %s: %s", p, e)
+            continue
+        if exists:
             if p == candidates[0]:
                 logger.info(
                     "[LLM Privacy Guard] 📁 Loading config from CWD: %s — "
@@ -103,7 +127,7 @@ def load_config() -> dict:
     config = dict(DEFAULT_CONFIG)
 
     # Deep-copy nested dicts to avoid reference pollution
-    for key in ("preprocess", "entropy", "rules", "placeholders", "whitelist"):
+    for key in ("proxy", "preprocess", "entropy", "rules", "placeholders", "whitelist"):
         if key in config and isinstance(config[key], dict):
             config[key] = dict(config[key])
 
@@ -120,7 +144,7 @@ def load_config() -> dict:
         return config
 
     # Deep merge (two levels only — preprocess, entropy, rules, placeholders, whitelist)
-    for section in ("preprocess", "entropy", "rules", "placeholders", "whitelist"):
+    for section in ("proxy", "preprocess", "entropy", "rules", "placeholders", "whitelist"):
         if section in user_config:
             if isinstance(config.get(section), dict) and isinstance(user_config[section], dict):
                 config[section].update(user_config[section])

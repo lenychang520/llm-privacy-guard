@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
 
 # ── JSONC / trailing-comma tolerant parser ──
 
@@ -38,6 +39,34 @@ def _write_json(path: str, data: dict):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
+
+
+def _normalize_model_key(model: str) -> str:
+    """Normalize a model name into a stable config key fragment."""
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "-", model.strip().lower()).strip("-")
+    return cleaned or "default-model"
+
+
+def _related_codex_models(model: str) -> list[str]:
+    """Return the active model plus a few closely related Codex/OpenAI variants."""
+    candidates = []
+    seen = set()
+
+    def _add(value: str):
+        if value and value not in seen:
+            seen.add(value)
+            candidates.append(value)
+
+    model = (model or "").strip()
+    _add(model)
+
+    model_lower = model.lower()
+    if model_lower in {"gpt-5.4", "gpt-5.4-mini", "gpt-5.5"}:
+        _add("gpt-5.4")
+        _add("gpt-5.4-mini")
+        _add("gpt-5.5")
+
+    return candidates
 
 
 # ── opencode ──
@@ -337,6 +366,135 @@ def setup_cline(port: int = 19999, dry_run: bool = False) -> list[str]:
     return messages
 
 
+# ── Codex ───────────────────────────────────────────────────────────────────
+
+_CODEX_CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".codex", "config.toml")
+
+
+def _quote_toml_string(value: str) -> str:
+    """Quote a TOML basic string safely."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _ensure_proxy_upstream_mapping(
+    model: str,
+    upstream: str,
+    dry_run: bool = False,
+) -> str:
+    """Persist a model -> upstream override in the user's config.yaml."""
+    import yaml
+    from privacy_engine.config import get_user_config_path
+
+    config_path = get_user_config_path()
+    key = _normalize_model_key(model)
+
+    try:
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = yaml.safe_load(f) or {}
+        else:
+            cfg = {}
+    except Exception:
+        cfg = {}
+
+    cfg.setdefault("proxy", {})
+    cfg["proxy"].setdefault("upstream_map", {})
+    existing = cfg["proxy"]["upstream_map"].get(key)
+    cfg["proxy"]["upstream_map"][key] = upstream
+
+    if not dry_run:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+
+    if existing == upstream:
+        return f"  config.yaml: upstream_map[{key}] already points to {upstream}"
+    return f"  config.yaml: upstream_map[{key}] -> {upstream}"
+
+
+def _ensure_proxy_upstream_mappings(
+    models: list[str],
+    upstream: str,
+    dry_run: bool = False,
+) -> list[str]:
+    """Persist multiple model -> upstream overrides."""
+    messages = []
+    for model in models:
+        messages.append(
+            _ensure_proxy_upstream_mapping(model, upstream, dry_run=dry_run)
+        )
+    return messages
+
+
+def setup_codex(port: int = 19999, dry_run: bool = False) -> list[str]:
+    """Configure Codex to route its current model provider through the proxy."""
+    proxy_url = f"http://127.0.0.1:{port}"
+    messages = []
+
+    if not os.path.isfile(_CODEX_CONFIG_PATH):
+        messages.append("Codex config not found at ~/.codex/config.toml")
+        return messages
+
+    try:
+        with open(_CODEX_CONFIG_PATH, "r", encoding="utf-8") as f:
+            raw = f.read()
+    except Exception as e:
+        return [f"  {_CODEX_CONFIG_PATH}: error - {e}"]
+
+    provider_match = re.search(r'(?m)^model_provider\s*=\s*"([^"]+)"\s*$', raw)
+    model_match = re.search(r'(?m)^model\s*=\s*"([^"]+)"\s*$', raw)
+    if not provider_match:
+        return [f"  {_CODEX_CONFIG_PATH}: model_provider not found"]
+
+    provider = provider_match.group(1)
+    model = model_match.group(1) if model_match else ""
+    section_pattern = (
+        r'(?ms)^(\[model_providers\.'
+        + re.escape(provider)
+        + r'\]\s*$)(.*?)(?=^\[|\Z)'
+    )
+    section_match = re.search(section_pattern, raw)
+    if not section_match:
+        return [f"  {_CODEX_CONFIG_PATH}: provider section [{provider}] not found"]
+
+    section_header = section_match.group(1)
+    section_body = section_match.group(2)
+    base_match = re.search(r'(?m)^base_url\s*=\s*"([^"]+)"\s*$', section_body)
+    if not base_match:
+        return [f"  {_CODEX_CONFIG_PATH}: [{provider}] has no base_url"]
+
+    original_base = base_match.group(1)
+    if "127.0.0.1" in original_base or "localhost" in original_base:
+        messages.append(f"  {_CODEX_CONFIG_PATH}: [{provider}] already local, skipping")
+        return messages
+
+    mapping_keys = _related_codex_models(model or provider)
+    messages.extend(
+        _ensure_proxy_upstream_mappings(mapping_keys, original_base, dry_run=dry_run)
+    )
+
+    new_section_body, replaced = re.subn(
+        r'(?m)^base_url\s*=\s*"([^"]+)"\s*$',
+        f"base_url = {_quote_toml_string(proxy_url)}",
+        section_body,
+        count=1,
+    )
+    if replaced != 1:
+        return [f"  {_CODEX_CONFIG_PATH}: failed to rewrite [{provider}] base_url"]
+
+    new_section = section_header + new_section_body
+    updated = raw[:section_match.start()] + new_section + raw[section_match.end():]
+
+    if not dry_run:
+        with open(_CODEX_CONFIG_PATH, "w", encoding="utf-8") as f:
+            f.write(updated)
+
+    route_note = f" (model {model!r})" if model else ""
+    messages.append(f"  {_CODEX_CONFIG_PATH}: [{provider}] -> {proxy_url}{route_note}")
+    return messages
+
+
 # ── Auto-start on login ──
 
 
@@ -534,6 +692,7 @@ TOOL_SETUP_FUNCTIONS = {
     "opencode": setup_opencode,
     "continue": setup_continue,
     "cline": setup_cline,
+    "codex": setup_codex,
 }
 
 
@@ -552,6 +711,7 @@ def run_setup(port: int = 19999, upstream: str = "", dry_run: bool = False) -> i
 
     port = port or DEFAULT_PORT
     configured = 0
+    detected_tools: list[str] = []
 
     print(f"LLM Privacy Guard — Auto Setup")
     print(f"  Proxy: http://127.0.0.1:{port}")
@@ -577,6 +737,7 @@ def run_setup(port: int = 19999, upstream: str = "", dry_run: bool = False) -> i
             for msg in msgs:
                 print(msg)
             configured += 1
+            detected_tools.append(tool_name)
         else:
             print(f"  Not detected.")
         print()
@@ -585,6 +746,12 @@ def run_setup(port: int = 19999, upstream: str = "", dry_run: bool = False) -> i
     if configured:
         print(f"Configured {configured} tool(s). Your LLM traffic is now filtered.")
         print(f"Proxy running at http://127.0.0.1:{port}")
+        if "codex" in detected_tools and not dry_run:
+            print()
+            print("Codex detected.")
+            print("Recommended one-time step for hands-off use:")
+            print("  privacy-guard setup --auto-start")
+            print("After that, the proxy starts automatically on login and Codex keeps using the filtered local endpoint.")
     else:
         print("No tools detected. Manually set your LLM client's API base URL to:")
         print(f"  http://127.0.0.1:{port}")

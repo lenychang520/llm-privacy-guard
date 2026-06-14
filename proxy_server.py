@@ -26,6 +26,7 @@ if _prj_dir not in sys.path:
     sys.path.insert(0, _prj_dir)
 
 from privacy_engine import filter_text, __version__ as engine_version
+from privacy_engine.config import load_config
 
 logger = logging.getLogger("privacy_guard.proxy")
 
@@ -38,8 +39,10 @@ STOP_FILE = os.path.join(_prj_dir, ".privacy_guard_stop")
 _FILTER_PATHS = {
     "/v1/chat/completions",
     "/v1/messages",
+    "/v1/responses",
     "/chat/completions",  # OpenAI SDK may strip /v1 prefix
     "/messages",           # Anthropic SDK variant
+    "/responses",          # Responses API without /v1 prefix
 }
 
 # ── Model → upstream URL mapping (checked via substring match) ──
@@ -75,6 +78,25 @@ _HOP_BY_HOP = {
 }
 
 
+def _configured_upstream_map() -> list[tuple[str, str]]:
+    """Return config-defined model -> upstream routes before built-ins."""
+    try:
+        config = load_config()
+    except Exception:
+        return list(_MODEL_UPSTREAM_MAP)
+
+    custom_map = config.get("proxy", {}).get("upstream_map", {})
+    if not isinstance(custom_map, dict):
+        return list(_MODEL_UPSTREAM_MAP)
+
+    custom_entries = []
+    for keyword, upstream in custom_map.items():
+        if isinstance(keyword, str) and isinstance(upstream, str) and keyword and upstream:
+            custom_entries.append((keyword.lower(), upstream))
+
+    return custom_entries + list(_MODEL_UPSTREAM_MAP)
+
+
 def _normalize_path(path: str) -> str:
     """Strip query string from path for route matching."""
     return path.split("?", 1)[0]
@@ -88,13 +110,14 @@ def _resolve_upstream(model: str, fallback: str = "") -> str:
     """
     if model:
         model_lower = model.lower()
-        for keyword, upstream in _MODEL_UPSTREAM_MAP:
-            if keyword in model_lower:
+        model_normalized = "".join(ch if ch.isalnum() else "-" for ch in model_lower)
+        for keyword, upstream in _configured_upstream_map():
+            if keyword in model_lower or keyword in model_normalized:
                 return upstream
         logger.warning(
             "Unrecognized model '%s' — no matching upstream. "
             "Known patterns: %s. Use --upstream to set a fallback.",
-            model, [k for k, _ in _MODEL_UPSTREAM_MAP],
+            model, [k for k, _ in _configured_upstream_map()],
         )
     return fallback
 
@@ -105,6 +128,32 @@ class _ProxyHandler(BaseHTTPRequestHandler):
     # Set by factory via class variable
     fallback_upstream: str = ""
 
+    def _join_upstream_path(self, upstream_path: str, request_path: str) -> str:
+        """Join upstream base path and request path without duplicating /v1."""
+        upstream_path = (upstream_path or "").rstrip("/")
+        if "?" in request_path:
+            req_path, query = request_path.split("?", 1)
+        else:
+            req_path, query = request_path, ""
+
+        normalized_req = req_path if req_path.startswith("/") else "/" + req_path
+        if not upstream_path:
+            path = normalized_req
+        else:
+            normalized_up = upstream_path if upstream_path.startswith("/") else "/" + upstream_path
+            if (
+                normalized_req == normalized_up
+                or normalized_req.startswith(normalized_up + "/")
+                or (normalized_up.endswith("/v1") and normalized_req.startswith("/v1/"))
+            ):
+                path = normalized_req
+            else:
+                path = normalized_up + normalized_req
+
+        if query:
+            path += "?" + query
+        return path
+
     def _forward(self, body: bytes):
         """Forward request to appropriate upstream and stream response back."""
         try:
@@ -114,25 +163,15 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             scheme = parsed.scheme
             netloc = parsed.netloc
 
-            # Build target path
-            up_path = parsed.path.rstrip("/")
-            req_path = self.path
-            if "?" in req_path:
-                path_no_q, query = req_path.split("?", 1)
-            else:
-                path_no_q, query = req_path, ""
-            path = up_path + "/" + path_no_q.lstrip("/")
-            while "//" in path:
-                path = path.replace("//", "/")
-            if query:
-                path += "?" + query
+            path = self._join_upstream_path(parsed.path, self.path)
 
             headers = {}
             for k, v in self.headers.items():
-                if k.lower() in _HOP_BY_HOP or k.lower() == "host":
+                if k.lower() in _HOP_BY_HOP or k.lower() in {"host", "content-length"}:
                     continue
                 headers[k] = v
             headers["Host"] = netloc
+            headers["Content-Length"] = str(len(body))
 
             if scheme == "https":
                 conn = HTTPSConnection(netloc, timeout=120)
@@ -142,16 +181,33 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
 
+            response_preview = b""
+            chunks = []
+            while True:
+                chunk = resp.read(8192)
+                if not chunk:
+                    break
+                if len(response_preview) < 1000:
+                    response_preview += chunk[: 1000 - len(response_preview)]
+                chunks.append(chunk)
+
+            if resp.status >= 400:
+                logger.error(
+                    "Upstream returned %d for %s://%s%s | preview=%r",
+                    resp.status,
+                    scheme,
+                    netloc,
+                    path,
+                    response_preview.decode("utf-8", errors="replace"),
+                )
+
             self.send_response(resp.status)
             for key, val in resp.getheaders():
                 if key.lower() not in _HOP_BY_HOP:
                     self.send_header(key, val)
             self.end_headers()
 
-            while True:
-                chunk = resp.read(8192)
-                if not chunk:
-                    break
+            for chunk in chunks:
                 self.wfile.write(chunk)
                 self.wfile.flush()
 
@@ -199,6 +255,12 @@ class _ProxyHandler(BaseHTTPRequestHandler):
             if data["system"] != original:
                 filtered = True
 
+        if "instructions" in data and isinstance(data["instructions"], str):
+            original = data["instructions"]
+            data["instructions"] = filter_text(original)
+            if data["instructions"] != original:
+                filtered = True
+
         if "messages" in data:
             for msg in data["messages"]:
                 content = msg.get("content")
@@ -217,10 +279,59 @@ class _ProxyHandler(BaseHTTPRequestHandler):
                                 if block["text"] != original:
                                     filtered = True
 
+        if "input" in data:
+            if isinstance(data["input"], str):
+                original = data["input"]
+                data["input"] = filter_text(original)
+                if data["input"] != original:
+                    filtered = True
+            else:
+                filtered = self._filter_responses_input(data["input"]) or filtered
+
         if filtered:
             logger.info("Filtered sensitive data from request")
 
         return json.dumps(data, ensure_ascii=False).encode("utf-8")
+
+    def _filter_responses_input(self, input_data) -> bool:
+        """Filter user-visible text in Responses API payloads."""
+        filtered = False
+
+        if isinstance(input_data, str):
+            return False
+        if not isinstance(input_data, list):
+            return False
+
+        for item in input_data:
+            if not isinstance(item, dict):
+                continue
+
+            instructions = item.get("instructions")
+            if isinstance(instructions, str):
+                redacted = filter_text(instructions)
+                if redacted != instructions:
+                    item["instructions"] = redacted
+                    filtered = True
+
+            content = item.get("content")
+            if isinstance(content, str):
+                redacted = filter_text(content)
+                if redacted != content:
+                    item["content"] = redacted
+                    filtered = True
+            elif isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    for key in ("text", "input_text"):
+                        text = block.get(key)
+                        if isinstance(text, str):
+                            redacted = filter_text(text)
+                            if redacted != text:
+                                block[key] = redacted
+                                filtered = True
+
+        return filtered
 
     # ── HTTP Methods ──
 

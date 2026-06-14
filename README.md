@@ -61,7 +61,7 @@ privacy-guard setup
 This single command does **all of this** in one shot:
 - Starts the proxy in background (with watchdog — auto-restarts if it crashes)
 - Scans `auth.json` to find your connected LLM providers
-- Configures **opencode**, **Continue.dev**, **Cline / Roo Code** to route through the proxy
+- Configures **opencode**, **Continue.dev**, **Cline / Roo Code**, **Codex** to route through the proxy
 - Prints what was configured
 
 Expected output:
@@ -106,6 +106,19 @@ privacy-guard setup --auto-start
 Now the proxy starts automatically every time you log in. You'll never need to think about it again.
 
 **Done.** Open your AI tools and use them as normal. Every message is silently filtered.
+
+### Codex: one-time setup, then automatic
+
+If you use Codex, the intended flow is:
+
+```bash
+privacy-guard setup
+privacy-guard setup --auto-start
+```
+
+`setup` rewrites your current Codex provider to `http://127.0.0.1:19999` and preserves the original upstream in `config.yaml`.
+
+`setup --auto-start` is a one-time step that makes the proxy start automatically when you log in, so you do **not** need to manually run `python cli.py setup` or restart the proxy before each Codex session.
 
 ### Does your traffic actually go through the proxy?
 
@@ -165,6 +178,7 @@ Run `privacy-guard setup` and these are **auto-configured** — no manual steps 
 | **opencode** | Reads connected providers from auth.json, sets `baseURL` |
 | **Continue.dev** | Updates `~/.continue/config.json` → `apiBase` |
 | **Cline / Roo Code** | Updates VS Code / Trae / Cursor `settings.json` |
+| **Codex** | Updates `~/.codex/config.toml` current provider `base_url`, and saves the original upstream in `config.yaml` so model-based routing still works |
 
 These tools need **one manual URL change** (set API endpoint to `http://localhost:19999`):
 
@@ -179,13 +193,15 @@ These tools need **one manual URL change** (set API endpoint to `http://localhos
 
 > **The proxy auto-detects the target provider from the request's `model` field** (DeepSeek, OpenAI, Anthropic, etc. — 14+ built-in). Unknown providers can use `--upstream` as a fallback.
 
+> **Codex note:** if your Codex client uses a third-party OpenAI-compatible provider, `privacy-guard setup` preserves that provider by writing a model → upstream override into your user `config.yaml`, then points Codex `base_url` to `http://127.0.0.1:19999`.
+
 ---
 
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
-| `privacy-guard setup` | One-shot: start proxy + auto-configure opencode / Continue / Cline |
+| `privacy-guard setup` | One-shot: start proxy + auto-configure opencode / Continue / Cline / Codex |
 | `privacy-guard setup --auto-start` | Register auto-start on login (Windows/Linux/macOS) |
 | `privacy-guard setup --remove-auto-start` | Remove auto-start registration |
 | `privacy-guard start` | **Default:** background + watchdog (auto-restarts on crash) |
@@ -275,14 +291,14 @@ ReDoS protection, 100KB input cap, protocol address whitelisting, no raw values 
 Detects target API from the request's `model` field. No vendor lock-in. 14+ providers built in.
 
 ### One-Click Setup
-`privacy-guard setup` auto-detects and configures opencode, Continue, and more — no manual config editing.
+`privacy-guard setup` auto-detects and configures opencode, Continue, Codex, and more — no manual config editing.
 
 ---
 
 ## Architecture
 
 ```
-Any LLM client (opencode / Continue / Cline / curl / SDK / …)
+Any LLM client (opencode / Continue / Cline / Codex / curl / SDK / …)
               │
               │  baseURL = http://localhost:19999
               ▼
@@ -308,7 +324,7 @@ Any LLM client (opencode / Continue / Cline / curl / SDK / …)
 |----------|------|
 | `proxy_server.py` | HTTP proxy: intercept → filter → forward |
 | `cli.py` | CLI: `setup` / `start` / `stop` / `status` / `test` |
-| `setup_tools.py` | Auto-config: detect & configure opencode, Continue, etc. |
+| `setup_tools.py` | Auto-config: detect & configure opencode, Continue, Codex, etc. |
 | `privacy_engine/detector.py` | Orchestration: regex + entropy, overlap dedup, replace |
 | `privacy_engine/patterns.py` | 27 compiled regex rules with priorities |
 | `privacy_engine/entropy.py` | Sliding-window Shannon entropy + false-positive filters |
@@ -326,7 +342,7 @@ Place `config.yaml` in your project or `~/.config/llm-privacy-guard/` (optional 
 # Proxy settings
 proxy:
   port: 19999
-  # Custom model → upstream mappings (appended before built-in map)
+  # Custom model → upstream mappings (checked before built-in map)
   upstream_map:
     my-provider: "https://api.my-provider.com"
 

@@ -115,6 +115,65 @@ def test_proxy_filtering():
     assert failed == 0, f"{failed} test(s) failed"
 
 
+def test_proxy_filters_responses_api():
+    """Responses API input text should be filtered before forwarding."""
+    mock_port = _free_port()
+    proxy_port = _free_port()
+
+    class MockUpstream(BaseHTTPRequestHandler):
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            data = json.loads(body)
+            self.wfile.write(json.dumps({"received": data, "path": self.path}).encode())
+
+        def log_message(self, *args):
+            pass
+
+    mock = HTTPServer(("127.0.0.1", mock_port), MockUpstream)
+    threading.Thread(target=mock.serve_forever, daemon=True).start()
+    time.sleep(0.3)
+
+    from proxy_server import start_server, _cleanup
+
+    threading.Thread(
+        target=start_server,
+        kwargs={"port": proxy_port, "upstream": f"http://127.0.0.1:{mock_port}"},
+        daemon=True,
+    ).start()
+    time.sleep(0.5)
+
+    body = json.dumps(
+        {
+            "model": "codex-test-model",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": "email me at user@example.com"},
+                        {"type": "input_text", "text": "contact me at user@company.com"},
+                    ],
+                }
+            ],
+        }
+    ).encode()
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{proxy_port}/v1/responses",
+        data=body,
+        headers={"Content-Type": "application/json"},
+    )
+    resp = urllib.request.urlopen(req, timeout=5)
+    result = json.loads(resp.read())
+    text = result["received"]["input"][0]["content"][1]["text"]
+
+    mock.shutdown()
+    _cleanup()
+
+    assert text == "contact me at [EMAIL]"
+
+
 if __name__ == "__main__":
     test_proxy_filtering()
-
